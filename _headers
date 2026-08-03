@@ -1,0 +1,7 @@
+/*
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+
+# Google's GIS OAuth popup needs this header to send its callback back to the
+# parent window. Without it the popup completes but the parent's callback never
+# fires and sign-in silently hangs. GitHub Pages cannot set custom headers,
+# which is why production is Cloudflare Pages.

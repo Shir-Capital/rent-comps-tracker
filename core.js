@@ -1,0 +1,529 @@
+/* ============================================================================
+   Rent Comps Tracker — core.js
+   Utilities, localStorage store, hash routing, schema helpers, and every
+   rent/market-rent computation. No DOM rendering and no network here.
+   Load order: schema.js -> core.js -> drive.js -> ui.js -> export.js -> app.js
+   ========================================================================= */
+
+'use strict';
+
+// ---------------------------------------------------------------- constants
+const STORE_KEY               = 'rent_comps_store_v1';
+const DRIVE_TOKEN_KEY         = 'rent_comps_drive_token';
+const DRIVE_TOKEN_EXP_KEY     = 'rent_comps_drive_token_exp';
+const CURRENT_USER_KEY        = 'rent_comps_current_user';
+const DRIVE_EVER_CONNECTED_KEY = 'rent_comps_drive_ever_connected_v1';
+const ONBOARDING_DISMISSED_KEY = 'rent_comps_onboarding_dismissed_v1';
+const HELLODATA_KEY_STORAGE   = 'rent_comps_hellodata_key_v1';
+const ASANA_TOKEN_STORAGE     = 'rent_comps_asana_token_v1';
+const MANIFEST_FILE_ID_KEY    = 'rent_comps_manifest_file_id';
+
+const STATE_FILENAME  = 'rent_comps.json';
+const COMPS_FOLDER    = '3. Comps';           // numbered deal subfolder
+const TRACKER_FOLDER  = 'Rent Comps Tracker'; // our subfolder inside it
+
+const APP_BASE_URL = 'https://rent-comps-tracker.pages.dev/';
+
+const STORE_VERSION = 1;
+
+// ------------------------------------------------------------- tiny helpers
+const $  = (sel, root) => (root || document).querySelector(sel);
+const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/** Numeric coercion that treats '' / null / junk as 0. */
+function num(v) {
+  if (v === '' || v == null) return 0;
+  const n = Number(String(v).replace(/[$,\s%]/g, ''));
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Like num() but preserves "no value" as null so blanks stay blank. */
+function numOrNull(v) {
+  if (v === '' || v == null) return null;
+  const n = Number(String(v).replace(/[$,\s%]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+
+function money(v, dp) {
+  const n = num(v);
+  return '$' + n.toLocaleString('en-US', {
+    minimumFractionDigits: dp || 0, maximumFractionDigits: dp == null ? 0 : dp,
+  });
+}
+function money2(v) { return money(v, 2); }
+function int(v) { return Math.round(num(v)).toLocaleString('en-US'); }
+
+function uid() {
+  return 'x' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+function nowISO() { return new Date().toISOString(); }
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+function relTime(iso) {
+  if (!iso) return 'never';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return 'never';
+  const m = Math.round(ms / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return m + 'm ago';
+  const h = Math.round(m / 60);
+  if (h < 24) return h + 'h ago';
+  return Math.round(h / 24) + 'd ago';
+}
+
+let TOAST_TIMER = null;
+function toast(msg, ms) {
+  const t = $('#toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.classList.remove('hidden');
+  clearTimeout(TOAST_TIMER);
+  TOAST_TIMER = setTimeout(() => t.classList.add('hidden'), ms || 2600);
+}
+
+function normalizeName(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/** "AUS TX - Crestwood" -> "AUSTX_Crestwood" (URL-safe, human readable). */
+function slugify(s) {
+  return String(s || '')
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .map((w, i) => (i === 0 ? w : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join('_')
+    .replace(/_+/g, '_')
+    .slice(0, 60) || 'property';
+}
+
+/** Strip city/state/zip so only the street address reaches the COMPS tab. */
+function streetOnly(addr) {
+  const s = String(addr || '').trim();
+  if (!s) return '';
+  return s.split(',')[0].trim();
+}
+
+// ------------------------------------------------------------ schema access
+const SCHEMA = window.SCHEMA || {};
+const TAB = SCHEMA.compsTab || {};
+const BUCKETS = SCHEMA.unitBuckets || [];
+const PHYSICAL = SCHEMA.physical || [];
+const AMENITIES = SCHEMA.amenities || [];
+const CATEGORIES = SCHEMA.categories || [];
+const MAX_COMPS = TAB.maxComps || 8;
+
+function bucketByKey(key) { return BUCKETS.find(b => b.key === key) || null; }
+
+/**
+ * Map a unit's beds/baths onto one of the 7 COMPS-tab sections.
+ * Mirrors classify_unit_type() in populate_comps.py: bath count only splits
+ * 2BR and 3BR; 4BR+ all land in the single 4/2 section.
+ * Returns null when beds is blank so the UI can flag the row instead of
+ * silently filing it under Efficiency.
+ */
+function bucketFor(beds, baths) {
+  if (beds === '' || beds == null) return null;
+  const b = num(beds);
+  const ba = num(baths);
+  if (b <= 0) return 'efficiency';
+  if (b === 1) return '1br1ba';
+  if (b === 2) return ba >= 2 ? '2br2ba' : '2br1ba';
+  if (b === 3) return ba >= 2 ? '3br2ba' : '3br1ba';
+  return '4br2ba';
+}
+
+/** "2BR/2BA" style label the populator's classify_unit_type() also accepts. */
+function bucketTypeLabel(bucketKey) {
+  const b = bucketByKey(bucketKey);
+  if (!b) return '';
+  if (b.beds === 0) return 'Studio';
+  return b.beds + 'BR/' + b.baths + 'BA';
+}
+
+function optionsFor(field) {
+  if (field.options) return field.options.slice();
+  if (field.options_ref) return (SCHEMA[field.options_ref] || []).slice();
+  return [];
+}
+
+function categoryMeta(key) {
+  return CATEGORIES.find(c => c.key === key) || null;
+}
+
+// -------------------------------------------------------------------- store
+let STORE = { version: STORE_VERSION, properties: {}, currentPropertyId: null };
+let STATE = null;           // the open property record (a reference into STORE)
+
+function loadStore() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.properties) STORE = parsed;
+    }
+  } catch (e) {
+    console.warn('store parse failed, starting fresh', e);
+  }
+  if (!STORE.properties) STORE.properties = {};
+  if (!STORE.version) STORE.version = STORE_VERSION;
+  return STORE;
+}
+
+function saveStore() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+  } catch (e) {
+    console.error('saveStore failed', e);
+    toast('⚠ Local storage full — export and clear old properties');
+  }
+}
+
+/**
+ * Persist the open property. Stamps `updated`/`lastEditor` and schedules the
+ * debounced Drive push (Drive is authoritative; localStorage is a cache).
+ */
+function saveState(opts) {
+  if (!STATE) return;
+  STATE.updated = nowISO();
+  if (typeof CURRENT_USER === 'object' && CURRENT_USER && CURRENT_USER.email) {
+    STATE.lastEditor = CURRENT_USER.email;
+  }
+  saveStore();
+  if (!(opts && opts.noPush) && typeof scheduleAutoPush === 'function') {
+    scheduleAutoPush();
+  }
+}
+
+function blankPhysical() {
+  const o = {};
+  PHYSICAL.forEach(p => { o[p.key] = ''; });
+  return o;
+}
+function blankAmenities() {
+  const o = {};
+  AMENITIES.forEach(a => { o[a.key] = ''; });
+  return o;
+}
+function blankFees() {
+  const o = {};
+  (SCHEMA.fees || []).forEach(f => { o[f.key] = ''; });
+  return o;
+}
+
+function newProperty(name) {
+  const id = uid();
+  const p = {
+    id,
+    name: String(name || '').trim() || 'Untitled',
+    created: nowISO(),
+    updated: nowISO(),
+    lastEditor: (typeof CURRENT_USER === 'object' && CURRENT_USER && CURRENT_USER.email) || '',
+    drive: {
+      folderId: '', folderName: '', pipelineName: '',
+      compsFolderId: '', trackerFolderId: '', fileId: '',
+      lastPushed: null, lastPulled: null, remoteModifiedTime: null,
+      autoSearchAttempted: false,
+    },
+    asana: { taskGid: '' },
+    subject: { name: String(name || '').trim() },
+    subjectUnitMix: [],
+    comps: [],
+    marketRents: {},   // bucketKey -> { override: '' }
+  };
+  STORE.properties[id] = p;
+  STORE.currentPropertyId = id;
+  saveStore();
+  return p;
+}
+
+/** Fill in any keys added by a later schema version. */
+function hydrateProperty(p) {
+  if (!p) return p;
+  p.drive = Object.assign({
+    folderId: '', folderName: '', pipelineName: '',
+    compsFolderId: '', trackerFolderId: '', fileId: '',
+    lastPushed: null, lastPulled: null, remoteModifiedTime: null,
+    autoSearchAttempted: false,
+  }, p.drive || {});
+  p.asana = Object.assign({ taskGid: '' }, p.asana || {});
+  p.subject = p.subject || {};
+  if (!Array.isArray(p.subjectUnitMix)) p.subjectUnitMix = [];
+  if (!Array.isArray(p.comps)) p.comps = [];
+  p.marketRents = p.marketRents || {};
+  p.comps.forEach(c => hydrateComp(c));
+  return p;
+}
+
+function hydrateComp(c) {
+  if (!c.compId) c.compId = uid();
+  if (!Array.isArray(c.unitMix)) c.unitMix = [];
+  c.physical = Object.assign(blankPhysical(), c.physical || {});
+  c.amenities = Object.assign(blankAmenities(), c.amenities || {});
+  c.fees = Object.assign(blankFees(), c.fees || {});
+  if (!c.category) c.category = '';
+  return c;
+}
+
+function newComp() {
+  return {
+    compId: uid(),
+    name: '', address: '', city: '', state: '', zip: '',
+    category: '',
+    year_built: '', total_units: '', stories: '',
+    distance_miles: '', occupancy_pct: '',
+    wd_type: '', reno_level: '',
+    source: '', hellodata_id: '',
+    phone: '', contact_name: '', website: '',
+    visited_at: '', visited_by: '',
+    unitMix: [],
+    physical: blankPhysical(),
+    amenities: blankAmenities(),
+    fees: blankFees(),
+    notes: '',
+  };
+}
+
+function newUnitRow() {
+  return { id: uid(), plan: '', beds: '', baths: '', sqft: '', count: '', occ_pct: '', ask_rent: '', concession: '', notes: '' };
+}
+function newSubjectUnitRow() {
+  return { id: uid(), plan: '', beds: '', baths: '', sqft: '', count: '', status: '', current_rent: '' };
+}
+
+function getComp(compId) {
+  if (!STATE) return null;
+  return STATE.comps.find(c => c.compId === compId) || null;
+}
+
+// ------------------------------------------------------------------ routing
+function propertySlug(p) { return slugify(p && (p.name || (p.subject && p.subject.name))); }
+function propertyHash(p) { return '#/prop/' + propertySlug(p); }
+
+function parseHash() {
+  const h = String(location.hash || '').replace(/^#/, '');
+  let m = h.match(/^\/prop\/(.+)$/);
+  if (m) return { kind: 'slug', value: decodeURIComponent(m[1]) };
+  m = h.match(/^\/p\/(.+)$/);           // legacy id form, rename-proof
+  if (m) return { kind: 'id', value: decodeURIComponent(m[1]) };
+  return { kind: 'home', value: '' };
+}
+
+let SUPPRESS_HASH_ROUTE = false;
+function setHash(hash) {
+  if (location.hash === hash) return;
+  SUPPRESS_HASH_ROUTE = true;
+  location.hash = hash;
+  setTimeout(() => { SUPPRESS_HASH_ROUTE = false; }, 0);
+}
+
+/** Most-recently-updated local property whose slug (or id) matches. */
+function findLocalPropertyByHash(route) {
+  const list = Object.values(STORE.properties || {});
+  let hits;
+  if (route.kind === 'id') {
+    hits = list.filter(p => p.id === route.value);
+  } else {
+    const want = route.value.toLowerCase();
+    hits = list.filter(p => propertySlug(p).toLowerCase() === want);
+  }
+  hits.sort((a, b) => String(b.updated || '').localeCompare(String(a.updated || '')));
+  return hits[0] || null;
+}
+
+// ============================================================================
+// COMPUTATION — unit-mix aggregation and suggested market rents
+// ============================================================================
+
+/** Group a unit-mix array into { bucketKey: [rows] }, plus an `unassigned` list. */
+function groupByBucket(rows) {
+  const out = { unassigned: [] };
+  BUCKETS.forEach(b => { out[b.key] = []; });
+  (rows || []).forEach(r => {
+    const k = bucketFor(r.beds, r.baths);
+    if (k && out[k]) out[k].push(r);
+    else out.unassigned.push(r);
+  });
+  return out;
+}
+
+/** Rows that carry enough data to matter: a rent, an SF, or a unit count. */
+function rowHasData(r) {
+  return num(r.count) > 0 || num(r.sqft) > 0 || num(r.ask_rent) > 0 || num(r.current_rent) > 0;
+}
+
+function unitMixTotals(rows) {
+  let units = 0, sf = 0, rentTotal = 0, rentedUnits = 0;
+  (rows || []).forEach(r => {
+    const c = num(r.count) || 0;
+    units += c;
+    sf += c * num(r.sqft);
+    const rent = num(r.ask_rent) || num(r.current_rent);
+    if (rent > 0) { rentTotal += rent * (c || 1); rentedUnits += (c || 1); }
+  });
+  return {
+    units,
+    sf,
+    avgSf: units > 0 ? sf / units : 0,
+    avgRent: rentedUnits > 0 ? rentTotal / rentedUnits : 0,
+    psf: sf > 0 && rentTotal > 0 ? rentTotal / sf : 0,
+  };
+}
+
+function directComps() {
+  if (!STATE) return [];
+  return STATE.comps.filter(c => c.category === 'direct');
+}
+
+/** Comps sorted the way the COMPS tab expects: direct -> aspirational -> inferior, then distance. */
+function sortedComps() {
+  if (!STATE) return [];
+  const order = { direct: 0, aspirational: 1, inferior: 2, '': 3 };
+  return STATE.comps.slice().sort((a, b) => {
+    const oa = order[a.category] == null ? 3 : order[a.category];
+    const ob = order[b.category] == null ? 3 : order[b.category];
+    if (oa !== ob) return oa - ob;
+    const da = numOrNull(a.distance_miles);
+    const db = numOrNull(b.distance_miles);
+    if (da == null && db == null) return 0;
+    if (da == null) return 1;
+    if (db == null) return -1;
+    return da - db;
+  });
+}
+
+/** Subject-side aggregate for one bucket (from the subject unit mix). */
+function subjectBucketAgg(bucketKey) {
+  const grouped = groupByBucket(STATE ? STATE.subjectUnitMix : []);
+  const rows = grouped[bucketKey] || [];
+  const t = unitMixTotals(rows);
+  return { rows, units: t.units, avgSf: t.avgSf, avgRent: t.avgRent, psf: t.psf };
+}
+
+/**
+ * Suggested market rent for one bucket, from DIRECT comps only.
+ *
+ * Two independent methods, mirroring populate_comps.py:
+ *   weighted — unit-count-weighted mean asking rent of direct-comp rows in
+ *              this bucket. Preferred: it is a like-for-like comparison.
+ *   psf      — unit-count-weighted mean $/SF of those same rows, applied to
+ *              the SUBJECT's average SF for the bucket. Fallback when the
+ *              comps' floorplans are sized differently than the subject's.
+ *
+ * `suggested` = weighted when available, else psf, rounded to the nearest $5.
+ * Rows missing rent are skipped rather than counted as $0.
+ */
+function computeSuggested(bucketKey) {
+  const comps = directComps();
+  let rentNum = 0, rentDen = 0;   // sum(rent*count) / sum(count)
+  let psfNum = 0, psfDen = 0;     // sum(rent) / sum(sf)  weighted by count
+  let sampleRows = 0, sampleComps = 0;
+
+  comps.forEach(c => {
+    const rows = groupByBucket(c.unitMix)[bucketKey] || [];
+    let used = 0;
+    rows.forEach(r => {
+      const rent = num(r.ask_rent);
+      if (rent <= 0) return;
+      const cnt = num(r.count) || 1;
+      const sf = num(r.sqft);
+      rentNum += rent * cnt;
+      rentDen += cnt;
+      if (sf > 0) { psfNum += rent * cnt; psfDen += sf * cnt; }
+      used++;
+    });
+    if (used) { sampleRows += used; sampleComps++; }
+  });
+
+  const subj = subjectBucketAgg(bucketKey);
+  const weighted = rentDen > 0 ? rentNum / rentDen : 0;
+  const psf = psfDen > 0 ? psfNum / psfDen : 0;
+  const psfApplied = psf > 0 && subj.avgSf > 0 ? psf * subj.avgSf : 0;
+
+  const raw = weighted > 0 ? weighted : psfApplied;
+  const suggested = raw > 0 ? Math.round(raw / 5) * 5 : 0;
+
+  return {
+    bucketKey,
+    weighted, psf, psfApplied, suggested,
+    method: weighted > 0 ? 'weighted' : (psfApplied > 0 ? 'psf' : 'none'),
+    sampleRows, sampleComps,
+    subjectUnits: subj.units, subjectAvgSf: subj.avgSf, subjectAvgRent: subj.avgRent,
+  };
+}
+
+/** The number that actually gets written to COMPS column G: override wins. */
+function effectiveMarketRent(bucketKey) {
+  const mr = (STATE && STATE.marketRents && STATE.marketRents[bucketKey]) || {};
+  const ov = numOrNull(mr.override);
+  if (ov != null && ov > 0) return { value: ov, source: 'override' };
+  const s = computeSuggested(bucketKey);
+  return { value: s.suggested, source: s.method };
+}
+
+/** All buckets, with everything the Market Rents tab and the export need. */
+function marketRentTable() {
+  return BUCKETS.map(b => {
+    const s = computeSuggested(b.key);
+    const eff = effectiveMarketRent(b.key);
+    const mr = (STATE && STATE.marketRents && STATE.marketRents[b.key]) || {};
+    const delta = s.subjectAvgRent > 0 && eff.value > 0 ? eff.value - s.subjectAvgRent : 0;
+    return {
+      bucket: b,
+      suggested: s.suggested,
+      weighted: s.weighted,
+      psf: s.psf,
+      psfApplied: s.psfApplied,
+      method: s.method,
+      sampleRows: s.sampleRows,
+      sampleComps: s.sampleComps,
+      subjectUnits: s.subjectUnits,
+      subjectAvgSf: s.subjectAvgSf,
+      subjectAvgRent: s.subjectAvgRent,
+      override: mr.override || '',
+      effective: eff.value,
+      effectiveSource: eff.source,
+      delta,
+      deltaPct: s.subjectAvgRent > 0 ? delta / s.subjectAvgRent : 0,
+    };
+  });
+}
+
+/** Per-comp roll-up used by the comp cards and the summary sheet. */
+function compStats(comp) {
+  const rows = (comp.unitMix || []).filter(rowHasData);
+  const t = unitMixTotals(rows);
+  const rents = rows.map(r => num(r.ask_rent)).filter(v => v > 0);
+  return {
+    planCount: rows.length,
+    units: t.units,
+    avgSf: t.avgSf,
+    avgRent: t.avgRent,
+    psf: t.psf,
+    minRent: rents.length ? Math.min.apply(null, rents) : 0,
+    maxRent: rents.length ? Math.max.apply(null, rents) : 0,
+    buckets: BUCKETS.filter(b => (groupByBucket(comp.unitMix)[b.key] || []).some(rowHasData)).map(b => b.short),
+  };
+}
+
+/**
+ * Per-comp, per-bucket overflow check. Each COMPS-tab section has a fixed
+ * number of rows; anything past that is silently dropped by the populator,
+ * so surface it here instead.
+ */
+function bucketCapacityIssues(comp) {
+  const grouped = groupByBucket(comp.unitMix);
+  const out = [];
+  BUCKETS.forEach(b => {
+    const n = (grouped[b.key] || []).filter(rowHasData).length;
+    const cap = b.endRow - b.startRow + 1;
+    if (n > cap) out.push({ bucket: b, count: n, cap });
+  });
+  return out;
+}

@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<meta name="theme-color" content="#1d2d47" />
+<title>Rent Comps Tracker</title>
+<link rel="icon" type="image/svg+xml" href="icon.svg" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<!-- Same condensed UI font as Capex Builder so the two applets read as one family. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700&display=swap" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<header class="app-header">
+  <div class="brand">
+    <button id="btn-back" class="btn-icon hidden" title="Properties">←</button>
+    <img class="logo" src="logo.svg" alt="SHIR" />
+    <span class="title" id="header-title">Rent Comps</span>
+  </div>
+  <div class="header-actions">
+    <button id="btn-menu" class="btn-icon" title="Menu">☰</button>
+  </div>
+</header>
+
+<div id="sync-bar" class="sync-bar hidden"></div>
+
+<nav class="phase-tabs" id="phase-tabs">
+  <button class="tab active" data-phase="1">1. Subject</button>
+  <button class="tab" data-phase="2">2. Comps</button>
+  <button class="tab" data-phase="3">3. Market Rents</button>
+  <button class="tab" data-phase="4">4. Export</button>
+</nav>
+
+<main id="phase-content"></main>
+<main id="home-content" class="hidden"></main>
+
+<div id="menu-drawer" class="drawer hidden">
+  <button class="drawer-close">✕</button>
+
+  <div id="drawer-property-section">
+    <h3>Property</h3>
+    <button id="btn-find-folder">🔍 Find Drive Folder (by name/city)</button>
+    <button id="btn-link-folder">Link Drive Folder by URL…</button>
+    <div id="folder-status" class="muted small"></div>
+    <button id="btn-rename">Rename</button>
+    <button id="btn-delete">Delete Property</button>
+    <hr/>
+    <h3>Sync</h3>
+    <button id="btn-resync">↻ Re-sync from Drive</button>
+    <div id="sync-status" class="muted small"></div>
+    <button id="btn-export-json">Export Populator JSON (download)</button>
+    <button id="btn-export-xlsx">Export Comps Workbook → Drive</button>
+    <hr/>
+  </div>
+
+  <h3>Google Drive</h3>
+  <button id="btn-drive-connect">Connect Google Drive</button>
+  <div id="drive-status" class="muted small">Not connected</div>
+  <hr/>
+  <h3>HelloData</h3>
+  <button id="btn-set-hellodata-key">Set HelloData API Key</button>
+  <button id="btn-share-hellodata-key">Share Key Org-Wide (Drive)</button>
+  <div id="hellodata-key-status" class="muted small">No key set</div>
+  <hr/>
+  <h3>Asana</h3>
+  <button id="btn-set-asana-token">Set Asana Token</button>
+  <button id="btn-share-asana-token">Share Token Org-Wide (Drive)</button>
+  <button id="btn-link-asana">Write Rent Comps Link to Asana (this property)</button>
+  <div id="asana-token-status" class="muted small">No token set</div>
+  <hr/>
+  <div class="muted small">v0.1 · Rent Comps Tracker</div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<!-- Load order matters: schema -> core -> drive -> ui -> export -> app(boot). -->
+<script src="schema.js"></script>
+<script src="core.js"></script>
+<script src="drive.js"></script>
+<script src="ui.js"></script>
+<script src="export.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
