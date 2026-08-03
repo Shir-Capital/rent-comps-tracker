@@ -446,6 +446,9 @@ let PUSH_IN_FLIGHT = false;
 async function pushToDrive(opts) {
   const silent = !!(opts && opts.silent);
   if (!STATE) return false;
+  // A deleted property must never be resurrected by a late push, even if this
+  // call was already queued when the delete happened.
+  if (!STORE.properties[STATE.id]) return false;
   if (!driveConnected()) { if (!silent) toast('Connect Google Drive first'); return false; }
   if (!STATE.drive.folderId) { if (!silent) toast('Link a Drive deal folder first'); return false; }
   if (PUSH_IN_FLIGHT) return false;
@@ -495,6 +498,20 @@ function scheduleAutoPush() {
   if (!STATE || !STATE.drive.folderId || !driveConnected()) return;
   clearTimeout(_autoPushTimer);
   _autoPushTimer = setTimeout(() => { pushToDrive({ silent: true }); }, AUTO_PUSH_DEBOUNCE_MS);
+}
+
+/**
+ * Drop any pending debounced push.
+ *
+ * Must be called before deleting a property. Otherwise an in-flight
+ * `scheduleAutoPush` timer fires during `removeManifestEntry`'s awaits and
+ * re-upserts the entry it just removed — the property reappears on the home
+ * screen as a remote `☁` card seconds after being deleted. Caught by the live
+ * sync test on 2026-08-03.
+ */
+function cancelAutoPush() {
+  clearTimeout(_autoPushTimer);
+  _autoPushTimer = null;
 }
 
 function deviceIsDirty() {

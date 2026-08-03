@@ -175,6 +175,11 @@ function wireDrawer() {
       + 'The Drive copy in 3. Comps / Rent Comps Tracker is left alone — delete it there '
       + 'too if you want it gone org-wide.')) return;
     const id = STATE.id;
+    // Order matters: stop anything that could re-upsert the manifest entry
+    // BEFORE removing it, and drop the local record first so a queued push
+    // bails on its STORE check. See cancelAutoPush() in drive.js.
+    cancelAutoPush();
+    stopAutoSync();
     delete STORE.properties[id];
     saveStore();
     await removeManifestEntry(id);
