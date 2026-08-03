@@ -27,6 +27,13 @@ const SYNC_INTERVAL_MS    = 60_000;
 const HEARTBEAT_STALE_MS  = 2.5 * 60_000;
 const AUTO_PUSH_DEBOUNCE_MS = 2_000;
 
+// Per-deal dated backups of the property JSON, kept alongside the live file
+// inside the deal's "3. Comps" folder. The live `rent_comps.json` is overwritten
+// on every push, so without these the only history is Drive's own file versions.
+const BACKUP_FOLDER = 'Backups';
+const BACKUP_MIN_INTERVAL_MS = 6 * 60 * 60 * 1000;  // at most one write per 6 h
+const BACKUP_KEEP = 40;                             // prune oldest beyond this
+
 // Defence-in-depth mirror of the Workspace domains.
 const ALLOWED_EMAIL_DOMAINS = [
   'shircapital.com',
@@ -349,13 +356,6 @@ async function resolveHelloDataKey() {
   const cfg = await loadSharedConfig();
   return cfg.hellodata_api_key || '';
 }
-function getAsanaToken() { return localStorage.getItem(ASANA_TOKEN_STORAGE) || ''; }
-async function resolveAsanaToken() {
-  const personal = getAsanaToken();
-  if (personal) return personal;
-  const cfg = await loadSharedConfig();
-  return cfg.asana_pat || '';
-}
 
 // ------------------------------------------------- deal-folder link + paths
 /**
@@ -482,6 +482,9 @@ async function pushToDrive(opts) {
     STATE.drive.remoteModifiedTime = r.modifiedTime || nowISO();
     saveStore();
     await upsertManifestEntry(STATE);
+    // Dated backup, throttled. Never allowed to fail the save.
+    try { await writeBackup(STATE, { force: !silent && !!(opts && opts.forceBackup) }); }
+    catch (e) { console.warn('backup skipped', e); }
     if (!silent) toast('Saved to Drive');
     updateSyncStatus();
     return true;
@@ -491,6 +494,64 @@ async function pushToDrive(opts) {
     return false;
   } finally {
     PUSH_IN_FLIGHT = false;
+  }
+}
+
+/**
+ * Write a dated backup of the property JSON into
+ *   <deal>/3. Comps/Rent Comps Tracker/Backups/rent_comps_<slug>_<YYYY-MM-DD>.json
+ *
+ * One file per calendar day per property: repeat pushes on the same day update
+ * that day's file rather than piling up hundreds of copies (auto-push fires on a
+ * 2 s debounce, so anything per-push would be unusable). Writes are additionally
+ * throttled to BACKUP_MIN_INTERVAL_MS so a long editing session does not
+ * re-upload constantly, and the folder is pruned to BACKUP_KEEP newest files.
+ *
+ * Returns true if a file was written. Callers must treat failure as non-fatal —
+ * a backup problem must never stop the live save from succeeding.
+ */
+async function writeBackup(p, opts) {
+  const force = !!(opts && opts.force);
+  if (!p || !driveConnected() || !p.drive.folderId) return false;
+
+  const today = todayISO();
+  const last = p.drive.lastBackupAt;
+  if (!force && last) {
+    const sameDay = String(last).slice(0, 10) === today;
+    const fresh = (Date.now() - new Date(last).getTime()) < BACKUP_MIN_INTERVAL_MS;
+    if (sameDay && fresh) return false;
+  }
+
+  await ensureTrackerFolder(p);
+  const folder = await driveEnsureSubfolder(p.drive.trackerFolderId, BACKUP_FOLDER);
+  p.drive.backupFolderId = folder;
+
+  const name = `rent_comps_${propertySlug(p)}_${today}.json`;
+  const safe = name.replace(/'/g, "\\'");
+  const hits = await driveList(
+    `'${folder}' in parents and name='${safe}' and trashed=false`, 'id,name');
+  await driveUploadJson(folder, name, serializeProperty(p), hits.length ? hits[0].id : undefined);
+
+  p.drive.lastBackupAt = nowISO();
+  saveStore();
+
+  await pruneBackups(folder);
+  return true;
+}
+
+/** Keep the newest BACKUP_KEEP dated backups; trash the rest. */
+async function pruneBackups(folderId) {
+  try {
+    const files = await driveList(
+      `'${folderId}' in parents and trashed=false`, 'id,name,modifiedTime');
+    if (files.length <= BACKUP_KEEP) return;
+    // Filenames end in the ISO date, so a plain name sort is chronological.
+    files.sort((a, b) => String(b.name).localeCompare(String(a.name)));
+    for (const f of files.slice(BACKUP_KEEP)) {
+      await driveRaw('/drive/v3/files/' + f.id + '?supportsAllDrives=true', { method: 'DELETE' });
+    }
+  } catch (e) {
+    console.warn('pruneBackups', e);
   }
 }
 
@@ -605,7 +666,8 @@ function updateSyncStatus() {
   if (!s || !STATE) return;
   if (!STATE.drive.folderId) { s.textContent = 'No Drive folder linked.'; return; }
   s.textContent = 'Last saved to Drive ' + relTime(STATE.drive.lastPushed)
-    + (deviceIsDirty() ? ' · unsynced edits pending' : '');
+    + (deviceIsDirty() ? ' · unsynced edits pending' : '')
+    + ' · last backup ' + relTime(STATE.drive.lastBackupAt);
 }
 
 function showSyncBar(html) {
@@ -662,7 +724,6 @@ function manifestEntryFor(p) {
     directCompCount: (p.comps || []).filter(c => c.category === 'direct').length,
     subjectUnitTypes: (p.subjectUnitMix || []).length,
     bucketsPriced: rents.filter(r => r.effective > 0).length,
-    asanaTaskGid: (p.asana && p.asana.taskGid) || '',
   };
 }
 

@@ -53,7 +53,6 @@ function openDrawer() {
   updateSyncStatus();
   updateFolderStatus();
   updateHelloDataStatus();
-  updateAsanaStatus();
 }
 function closeDrawer() { $('#menu-drawer').classList.add('hidden'); }
 
@@ -66,17 +65,6 @@ function updateHelloDataStatus() {
   resolveHelloDataKey().then(v => {
     n.textContent = v ? 'Using org-shared key (Drive)' : 'No key set';
   }).catch(() => { n.textContent = 'No key set'; });
-}
-
-function updateAsanaStatus() {
-  const n = $('#asana-token-status');
-  if (!n) return;
-  const t = getAsanaToken();
-  if (t) { n.textContent = 'Personal token set (' + t.slice(0, 8) + '…)'; return; }
-  n.textContent = 'Checking org-shared token…';
-  resolveAsanaToken().then(v => {
-    n.textContent = v ? 'Using org-shared token (Drive)' : 'No token set';
-  }).catch(() => { n.textContent = 'No token set'; });
 }
 
 // -------------------------------------------------------------------- wire
@@ -120,7 +108,7 @@ function wireHomeDelegation() {
     const add = ev.target.closest('#btn-new-prop');
     if (add) {
       const name = prompt('Subject property name?\n\n'
-        + 'Use the deal-folder name so the Drive link and Asana match, e.g. "AUS TX - Crestwood".');
+        + 'Use the deal-folder name so the Drive folder search matches, e.g. "AUS TX - Crestwood".');
       if (!name || !name.trim()) return;
       const p = newProperty(name.trim());
       openProperty(p.id);
@@ -189,6 +177,22 @@ function wireDrawer() {
   };
 
   $('#btn-resync').onclick = () => { closeDrawer(); pullFromDrive(); };
+
+  $('#btn-backup-now').onclick = async () => {
+    if (!STATE) return;
+    closeDrawer();
+    if (!driveConnected()) { toast('Connect Google Drive first'); return; }
+    if (!STATE.drive.folderId) { toast('Link a Drive deal folder first'); return; }
+    toast('Backing up…');
+    try {
+      // force: bypass the 6 h throttle — the user asked for it explicitly.
+      const wrote = await writeBackup(STATE, { force: true });
+      toast(wrote ? 'Backed up to 3. Comps / Rent Comps Tracker / Backups' : 'Nothing to back up');
+      updateSyncStatus();
+    } catch (e) {
+      toast('Backup failed: ' + (e.message || e));
+    }
+  };
   $('#btn-export-json').onclick = () => { closeDrawer(); exportPopulatorJson(); };
   $('#btn-export-xlsx').onclick = () => { closeDrawer(); exportWorkbook({ toDrive: true }); };
 
@@ -213,28 +217,6 @@ function wireDrawer() {
       toast('Key shared org-wide');
     } catch (e) { toast('Share failed: ' + (e.message || e)); }
   };
-
-  $('#btn-set-asana-token').onclick = () => {
-    const cur = getAsanaToken();
-    const t = prompt('Asana personal access token (stored on this device only):', cur);
-    if (t == null) return;
-    if (t.trim()) localStorage.setItem(ASANA_TOKEN_STORAGE, t.trim());
-    else localStorage.removeItem(ASANA_TOKEN_STORAGE);
-    updateAsanaStatus();
-    toast(t.trim() ? 'Token saved on this device' : 'Personal token cleared');
-  };
-  $('#btn-share-asana-token').onclick = async () => {
-    const t = getAsanaToken();
-    if (!t) { toast('Set a personal token first'); return; }
-    if (!driveConnected()) { toast('Connect Google Drive first'); return; }
-    if (!confirm('Write this token to ' + CONFIG_FILENAME + ' in the applet\'s Drive folder?')) return;
-    try {
-      await saveSharedConfigKey('asana_pat', t);
-      updateAsanaStatus();
-      toast('Token shared org-wide');
-    } catch (e) { toast('Share failed: ' + (e.message || e)); }
-  };
-  $('#btn-link-asana').onclick = () => { closeDrawer(); syncLinkToAsana(true); };
 }
 
 // -------------------------------------------------------------------- boot

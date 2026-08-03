@@ -15,7 +15,6 @@ const CURRENT_USER_KEY        = 'rent_comps_current_user';
 const DRIVE_EVER_CONNECTED_KEY = 'rent_comps_drive_ever_connected_v1';
 const ONBOARDING_DISMISSED_KEY = 'rent_comps_onboarding_dismissed_v1';
 const HELLODATA_KEY_STORAGE   = 'rent_comps_hellodata_key_v1';
-const ASANA_TOKEN_STORAGE     = 'rent_comps_asana_token_v1';
 const MANIFEST_FILE_ID_KEY    = 'rent_comps_manifest_file_id';
 
 const STATE_FILENAME  = 'rent_comps.json';
@@ -23,12 +22,12 @@ const COMPS_FOLDER    = '3. Comps';           // numbered deal subfolder
 const TRACKER_FOLDER  = 'Rent Comps Tracker'; // our subfolder inside it
 
 // Derived from wherever the app is actually served, NOT hardcoded — the shareable
-// links written into Asana and into the export payload then stay correct whether
-// this is on workers.dev, pages.dev, or a custom domain. Falls back to the
-// workers.dev host only if `location` is somehow unavailable.
+// link in the export payload then stays correct whether this is on pages.dev,
+// workers.dev, or a custom domain. Falls back to the canonical host only if
+// `location` is somehow unavailable.
 const APP_BASE_URL = (typeof location !== 'undefined' && location.origin)
   ? location.origin + '/'
-  : 'https://rent-comps-tracker.egordon.workers.dev/';
+  : 'https://rent-comps-tracker.pages.dev/';
 
 const STORE_VERSION = 1;
 
@@ -233,11 +232,11 @@ function newProperty(name) {
     lastEditor: (typeof CURRENT_USER === 'object' && CURRENT_USER && CURRENT_USER.email) || '',
     drive: {
       folderId: '', folderName: '', pipelineName: '',
-      compsFolderId: '', trackerFolderId: '', fileId: '',
+      compsFolderId: '', trackerFolderId: '', backupFolderId: '', fileId: '',
       lastPushed: null, lastPulled: null, remoteModifiedTime: null,
+      lastBackupAt: null,
       autoSearchAttempted: false,
     },
-    asana: { taskGid: '' },
     subject: { name: String(name || '').trim() },
     subjectUnitMix: [],
     comps: [],
@@ -254,11 +253,12 @@ function hydrateProperty(p) {
   if (!p) return p;
   p.drive = Object.assign({
     folderId: '', folderName: '', pipelineName: '',
-    compsFolderId: '', trackerFolderId: '', fileId: '',
+    compsFolderId: '', trackerFolderId: '', backupFolderId: '', fileId: '',
     lastPushed: null, lastPulled: null, remoteModifiedTime: null,
+    lastBackupAt: null,
     autoSearchAttempted: false,
   }, p.drive || {});
-  p.asana = Object.assign({ taskGid: '' }, p.asana || {});
+  delete p.asana;   // Asana integration removed 2026-08-03; drop it from old records
   p.subject = p.subject || {};
   if (!Array.isArray(p.subjectUnitMix)) p.subjectUnitMix = [];
   if (!Array.isArray(p.comps)) p.comps = [];

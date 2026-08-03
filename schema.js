@@ -293,7 +293,7 @@ window.SCHEMA = {
       "key": "name",
       "label": "Property Name",
       "type": "text",
-      "note": "Never auto-filled — must match the Drive deal-folder / Asana name."
+      "note": "Never auto-filled — use the Drive deal-folder name so the folder search matches."
     },
     {
       "key": "address",

@@ -1,8 +1,11 @@
 /* ============================================================================
    Rent Comps Tracker — export.js
    Tab 4 (validation + exports), the populate_comps.py handoff payload, the
-   branded reconciliation workbook, Drive folder linking, HelloData import,
-   and the Asana deal-task link.
+   branded reconciliation workbook, Drive folder linking, and HelloData import.
+
+   No Asana integration — deliberately removed 2026-08-03. Capex Builder writes
+   its URL to the deal task; this applet does not, and there is no "Rent Comps
+   Link" custom field. Don't add one back without a reason.
 
    Deliberate design choice: this app does NOT write into the deal's proforma
    .xlsx directly. Round-tripping a 2 MB SHIR proforma through a browser Excel
@@ -15,10 +18,6 @@
 'use strict';
 
 const HELLODATA_BASE = 'https://api.hellodata.ai';
-const ASANA_API = 'https://app.asana.com/api/1.0';
-const ASANA_DEAL_PROJECTS = ['701270220756366', '1214742025664401']; // PIPELINE + ExStay Conv.
-const ASANA_TASK_PAGE_LIMIT = 100;
-const ASANA_TASK_MAX_PAGES = 12;
 
 // ============================================================================
 // Validation
@@ -964,104 +963,5 @@ async function hdPullComparables() {
   } catch (e) {
     console.error(e);
     toast('HelloData failed: ' + (e.message || e));
-  }
-}
-
-// ============================================================================
-// Asana
-// ============================================================================
-
-async function asanaFetch(path, init) {
-  const token = await resolveAsanaToken();
-  if (!token) throw new Error('No Asana token — set one in the ☰ menu');
-  const opts = Object.assign({}, init || {});
-  opts.headers = Object.assign({ Authorization: 'Bearer ' + token }, opts.headers || {});
-  const res = await fetch(ASANA_API + path, opts);
-  if (!res.ok) throw new Error('Asana ' + res.status + ' ' + res.statusText);
-  return res.json();
-}
-
-async function findAsanaCandidates(propName) {
-  const byGid = new Map();
-  for (const proj of ASANA_DEAL_PROJECTS) {
-    let path = `/projects/${proj}/tasks?opt_fields=name&limit=${ASANA_TASK_PAGE_LIMIT}`;
-    for (let page = 0; page < ASANA_TASK_MAX_PAGES && path; page++) {
-      const r = await asanaFetch(path);
-      (r.data || []).forEach(t => byGid.set(t.gid, t));
-      const off = r.next_page && r.next_page.offset;
-      path = off ? `/projects/${proj}/tasks?opt_fields=name&limit=${ASANA_TASK_PAGE_LIMIT}&offset=${off}` : '';
-    }
-  }
-  const want = normalizeName(propName);
-  const wantTokens = want.split(' ').filter(t => t.length > 2);
-  const out = [];
-  byGid.forEach(t => {
-    const got = normalizeName(t.name);
-    let score = 0;
-    if (got === want) score = 100;
-    else if (got.includes(want) || want.includes(got)) score = 80;
-    else {
-      const gotTokens = got.split(' ');
-      const hits = wantTokens.filter(x => gotTokens.includes(x)).length;
-      if (hits) score = Math.min(60, Math.round((hits / Math.max(1, wantTokens.length)) * 60));
-    }
-    if (score) out.push({ gid: t.gid, name: t.name, score });
-  });
-  out.sort((a, b) => b.score - a.score);
-  return out;
-}
-
-/**
- * Write this property's shareable URL into the deal's Asana task.
- * Needs a "Rent Comps Link" text custom field; its gid lives in the shared
- * config as `asana_rent_comps_link_field`. Until that field exists in Asana
- * this no-ops with an explicit message rather than guessing a gid.
- */
-async function syncLinkToAsana(interactive) {
-  try {
-    const cfg = await loadSharedConfig();
-    const fieldGid = cfg.asana_rent_comps_link_field || '';
-    if (!fieldGid) {
-      if (interactive) {
-        alert('No "Rent Comps Link" custom field is configured yet.\n\n'
-          + 'Create a text custom field on the PIPELINE and ExStay Conv. projects, then store its\n'
-          + 'gid as "asana_rent_comps_link_field" in ' + CONFIG_FILENAME + ' in the applet\'s Drive folder.');
-      }
-      return false;
-    }
-    const name = (STATE.subject.name || STATE.name || '').trim();
-    if (!name) { if (interactive) toast('Name the subject first'); return false; }
-
-    let gid = STATE.asana.taskGid;
-    if (!gid) {
-      const cands = await findAsanaCandidates(name);
-      if (!cands.length) { if (interactive) toast('No Asana deal task matched'); return false; }
-      if (cands.length === 1 || cands[0].score >= 100) {
-        if (interactive && !confirm('Write the Rent Comps link to this Asana task?\n\n' + cands[0].name)) return false;
-        gid = cands[0].gid;
-      } else {
-        const pick = prompt('Which Asana task?\n\n'
-          + cands.slice(0, 5).map((c, i) => `${i + 1}. ${c.name} (${c.score})`).join('\n')
-          + '\n\nType a number:');
-        const i = Number(pick) - 1;
-        if (!(i >= 0 && i < Math.min(5, cands.length))) return false;
-        gid = cands[i].gid;
-      }
-      STATE.asana.taskGid = gid;
-      saveState();
-    }
-
-    const url = APP_BASE_URL + propertyHash(STATE);
-    await asanaFetch('/tasks/' + gid, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: { custom_fields: { [fieldGid]: url } } }),
-    });
-    if (interactive) toast('Rent Comps link written to Asana');
-    return true;
-  } catch (e) {
-    console.error('syncLinkToAsana', e);
-    if (interactive) toast('Asana write failed: ' + (e.message || e));
-    return false;
   }
 }
