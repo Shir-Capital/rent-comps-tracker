@@ -22,7 +22,13 @@ const STATE_FILENAME  = 'rent_comps.json';
 const COMPS_FOLDER    = '3. Comps';           // numbered deal subfolder
 const TRACKER_FOLDER  = 'Rent Comps Tracker'; // our subfolder inside it
 
-const APP_BASE_URL = 'https://rent-comps-tracker.pages.dev/';
+// Derived from wherever the app is actually served, NOT hardcoded — the shareable
+// links written into Asana and into the export payload then stay correct whether
+// this is on workers.dev, pages.dev, or a custom domain. Falls back to the
+// workers.dev host only if `location` is somehow unavailable.
+const APP_BASE_URL = (typeof location !== 'undefined' && location.origin)
+  ? location.origin + '/'
+  : 'https://rent-comps-tracker.egordon.workers.dev/';
 
 const STORE_VERSION = 1;
 

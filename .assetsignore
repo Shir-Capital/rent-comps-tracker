@@ -1,0 +1,16 @@
+# Files in the assets directory that must NOT be served publicly.
+# Wrangler's static-assets uploader takes `assets.directory = "."`, which means the
+# whole repo root — including dotfolders — becomes fetchable unless excluded here.
+# The first deploy (2026-08-03) served /.git/config and every /.git/objects/* blob
+# over the public URL. Harmless on a public repo, but a full source disclosure on a
+# private one, so this file is the guard. gitignore-style syntax.
+
+.git
+.git/**
+.wrangler
+.wrangler/**
+.gitignore
+.assetsignore
+wrangler.jsonc
+README.md
+*.log
