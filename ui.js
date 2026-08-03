@@ -777,9 +777,14 @@ function renderCompEditor(compId) {
         <span class="grow">Fees &amp; Other Income</span>
       </div>
       <div class="card-body">
-        <div class="muted small" style="margin-bottom:7px">Tracker-only — these are not
-          written to the COMPS tab, but they travel in the export JSON.</div>
-        ${fieldsHtml(SCHEMA.fees || [], c.fees, path + '.fees')}
+        <div class="muted small" style="margin-bottom:7px"><b>Required monthly fees</b> — charged to
+          ALL tenants. These go into the COMPS <b>FEES $/Mo</b> column and feed the template's
+          Eff. $/Mo formulas. Leave blank when unknown — never guess.</div>
+        ${fieldsHtml((SCHEMA.fees || []).filter(f => f.compsRow), c.fees, path + '.fees')}
+        <hr class="hr-soft"/>
+        <div class="muted small" style="margin-bottom:7px">Tracker-only (one-time / optional) — these
+          are not written to the COMPS tab, but they travel in the export JSON.</div>
+        ${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsRow), c.fees, path + '.fees')}
       </div>
     </div>`;
 

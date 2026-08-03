@@ -3,17 +3,19 @@
 // Rebuild: python Accessories/build_schema.py
 window.SCHEMA = {
   "compsTab": {
+    "templateVersion": "SHIR_MF_Template_v3",
+    "populatorScript": "rent-comp-data-populator-populate_comps-v30.py",
     "compBaseCols": [
-      23,
-      30,
-      37,
-      44,
-      51,
-      58,
-      65,
-      72
+      25,
+      34,
+      43,
+      52,
+      61,
+      70,
+      79,
+      88
     ],
-    "compBlockWidth": 7,
+    "compBlockWidth": 9,
     "maxComps": 8,
     "rowHeader": 3,
     "rowDetails": 4,
@@ -23,12 +25,14 @@ window.SCHEMA = {
     "rowAttrHeader": 88,
     "attrRowFirst": 89,
     "attrRowLast": 97,
+    "feeRowFirst": 89,
+    "feeRowLast": 96,
     "subjectMktRentCol": 7,
     "subjectUnitCountCol": 3,
     "offsets": {
       "compNum": 0,
       "compName": 1,
-      "compAddress": 5,
+      "compAddress": 7,
       "yearBuilt": 0,
       "totalUnits": 1,
       "stories": 2,
@@ -40,10 +44,15 @@ window.SCHEMA = {
       "unitSf": 2,
       "unitOccPct": 3,
       "unitAskRent": 4,
+      "unitAskPsf": 5,
+      "unitEffRent": 6,
+      "unitEffPsf": 7,
       "compTypeValue": 2,
-      "compSourceValue": 6,
+      "compSourceValue": 4,
       "physicalValue": 2,
-      "amenityValue": 5
+      "amenityValue": 5,
+      "feeLabel": 6,
+      "feeValue": 7
     }
   },
   "unitBuckets": [
@@ -493,6 +502,62 @@ window.SCHEMA = {
   ],
   "fees": [
     {
+      "key": "amenity",
+      "label": "Amenity / Mo",
+      "type": "number",
+      "compsRow": 89,
+      "row": "tfee1"
+    },
+    {
+      "key": "insurance",
+      "label": "Insurance / Mo",
+      "type": "number",
+      "compsRow": 90,
+      "row": "tfee1"
+    },
+    {
+      "key": "pest",
+      "label": "Pest / Mo",
+      "type": "number",
+      "compsRow": 91,
+      "row": "tfee2"
+    },
+    {
+      "key": "parking",
+      "label": "Parking / Mo",
+      "type": "number",
+      "compsRow": 92,
+      "row": "tfee2"
+    },
+    {
+      "key": "cleaning",
+      "label": "Cleaning / Mo",
+      "type": "number",
+      "compsRow": 93,
+      "row": "tfee3"
+    },
+    {
+      "key": "cable_internet",
+      "label": "Cable/Internet / Mo",
+      "type": "number",
+      "compsRow": 94,
+      "row": "tfee3"
+    },
+    {
+      "key": "utilities",
+      "label": "Utilities / Mo",
+      "type": "number",
+      "compsRow": 95,
+      "row": "tfee4"
+    },
+    {
+      "key": "wd",
+      "label": "W/D / Mo",
+      "type": "number",
+      "compsRow": 96,
+      "row": "tfee4"
+    },
+    {
       "key": "app_fee",
       "label": "Application Fee",
       "type": "number"
@@ -513,11 +578,6 @@ window.SCHEMA = {
       "type": "number"
     },
     {
-      "key": "parking",
-      "label": "Parking / Mo",
-      "type": "number"
-    },
-    {
       "key": "trash",
       "label": "Trash / Mo",
       "type": "number"
@@ -525,11 +585,6 @@ window.SCHEMA = {
     {
       "key": "valet_trash",
       "label": "Valet Trash / Mo",
-      "type": "number"
-    },
-    {
-      "key": "pest",
-      "label": "Pest / Mo",
       "type": "number"
     },
     {

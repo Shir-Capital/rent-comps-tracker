@@ -168,6 +168,10 @@ function buildPopulatorPayload() {
   return {
     skill_chain: 'rent-comps-tracker -> rent-comp-data-populator (populate_comps.py --skip-fetch)',
     generator: 'rent-comps-tracker',
+    /* Geometry stamp — v3 = 9-col comp stride from col Y. A v29-or-earlier
+       populator run against this payload's target template lands 2 cols off. */
+    template_version: TAB.templateVersion || 'SHIR_MF_Template_v3',
+    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v30.py',
     generated_at: nowISO(),
     generated_by: (CURRENT_USER && CURRENT_USER.email) || '',
     property_url: APP_BASE_URL + propertyHash(STATE).replace(/^#/, '#'),
@@ -487,7 +491,7 @@ async function buildCompsWorkbook() {
   {
     const ws = wb.addWorksheet('COMPS Cell Map');
     const heads = ['Cell', 'Row', 'Col', 'Belongs To', 'Field', 'Value'];
-    titleRow(ws, `COMPS TAB CELL MAP — what populate_comps.py should write`, heads.length);
+    titleRow(ws, `COMPS TAB CELL MAP — what populate_comps.py (v30) writes — ${TAB.templateVersion || 'SHIR_MF_Template_v3'}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
@@ -521,8 +525,9 @@ async function buildCompsWorkbook() {
       put(TAB.rowDetails, base + off.totalUnits, who, 'Total units', numOrNull(c.total_units));
       put(TAB.rowDetails, base + off.stories, who, 'Stories', numOrNull(c.stories));
       put(TAB.rowDetails, base + off.distanceMiles, who, 'Distance (mi)', numOrNull(c.distance_miles));
-      put(TAB.rowDetails, base + off.wdType, who, 'W/D type', c.wd_type || '');
-      put(TAB.rowDetails, base + off.renoLevel, who, 'Reno level', c.reno_level || '');
+      /* Row-4 W/D type + Reno level are MANUAL analyst cells in Template_v3 —
+         the v30 populator never writes them, so they stay off this map to keep
+         the populated-workbook reconciliation exactly 1:1. */
 
       put(TAB.rowCompType, base + off.compTypeValue, who, 'Comp Type',
         c.category ? categoryMeta(c.category).label : '');
@@ -544,6 +549,11 @@ async function buildCompsWorkbook() {
 
       PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, who, pa.label, c.physical[pa.key] || ''));
       AMENITIES.forEach(am => put(am.row, base + off.amenityValue, who, am.label, c.amenities[am.key] || ''));
+
+      /* FEES $/Mo column (Template_v3) — required-of-all-tenants monthly fees.
+         These feed the unit rows' Eff. $/Mo formulas, so blanks stay blank. */
+      (SCHEMA.fees || []).filter(f => f.compsRow).forEach(f =>
+        put(f.compsRow, base + off.feeValue, who, 'Fee — ' + f.label, numOrNull(c.fees[f.key])));
     });
 
     ws.columns = [{ width: 10 }, { width: 7 }, { width: 7 }, { width: 30 }, { width: 30 }, { width: 16 }];
@@ -682,10 +692,12 @@ function renderPhase4() {
       <div class="card-head"><span class="grow">Then, on a machine with the proforma</span></div>
       <div class="card-body">
         <div class="muted small">Run the proven populator against the deal's proforma:</div>
-        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\rent-comp-data-populator-populate_comps-v29.py" ^
+        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\rent-comp-data-populator-populate_comps-v30.py" ^
   "&lt;proforma_in.xlsx&gt;" "&lt;proforma_out.xlsx&gt;" "${esc(exportFileBase())}.json" --skip-fetch</pre>
         <div class="tiny muted" style="margin-top:6px">
-          Then reconcile the populated COMPS tab against the <b>COMPS Cell Map</b> sheet.
+          Then reconcile the populated COMPS tab against the <b>COMPS Cell Map</b> sheet.<br/>
+          ⚠ v30 requires a <b>SHIR_MF_Template_v3+</b> proforma (COMPS comps 9 columns wide from col Y).
+          For a v2 / v36-lineage workbook use populate_comps-<b>v29</b> — mixing versions lands every comp 2 columns off.
         </div>
       </div>
     </div>`;
