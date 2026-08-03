@@ -1,0 +1,19 @@
+# Wrangler writes these into the build container; the first (Worker) deploy also
+# committed a .gitignore of its own. Keep them out of the repo for good.
+.wrangler/
+wrangler.jsonc
+wrangler.toml
+
+# Node, only ever present if someone installs tooling locally — this app has no
+# build step and no package.json.
+node_modules/
+npm-debug.log*
+
+# Windows / macOS / Google Drive cruft. `desktop.ini` matters here: the working
+# copy lives inside a synced Google Drive folder that creates them.
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# Excel lock files, in case a control workbook is ever opened from this folder.
+~$*
