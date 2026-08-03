@@ -123,20 +123,41 @@ async function ensureTokenClient() {
   return TOKEN_CLIENT;
 }
 
+/**
+ * Ask GIS for an access token.
+ *
+ * ⚠️ GIS opens a popup, and a popup not triggered by a user gesture is blocked
+ * by the browser. When that happens GIS logs "Failed to open popup window" and
+ * — unless `error_callback` is wired — invokes NOTHING, so a bare promise here
+ * would never settle. `boot()` awaits this, so an unsettled promise silently
+ * skipped deep-link opening, reconcileFromDrive and startAutoSync on every load
+ * with an expired token. Hence both the error_callback and the hard timeout.
+ */
+const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
+
 function requestToken(prompt) {
   return new Promise(async (resolve, reject) => {
+    let settled = false;
+    const done = (fn, arg) => { if (!settled) { settled = true; clearTimeout(timer); fn(arg); } };
+    const timer = setTimeout(
+      () => done(reject, new Error('Google sign-in did not respond (popup blocked?)')),
+      TOKEN_REQUEST_TIMEOUT_MS
+    );
     try {
       const client = await ensureTokenClient();
       client.callback = (resp) => {
         if (resp && resp.access_token) {
           setDriveToken(resp.access_token, Number(resp.expires_in || 3600));
-          resolve(resp.access_token);
+          done(resolve, resp.access_token);
         } else {
-          reject(new Error((resp && resp.error) || 'Authorization failed'));
+          done(reject, new Error((resp && resp.error) || 'Authorization failed'));
         }
       };
+      client.error_callback = (err) => {
+        done(reject, new Error((err && (err.type || err.message)) || 'Sign-in was cancelled'));
+      };
       client.requestAccessToken({ prompt: prompt || '' });
-    } catch (e) { reject(e); }
+    } catch (e) { done(reject, e); }
   });
 }
 
