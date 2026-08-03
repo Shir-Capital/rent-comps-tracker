@@ -19,6 +19,13 @@
 
 const HELLODATA_BASE = 'https://api.hellodata.ai';
 
+/* What populate_comps.py actually writes into each comp unit row's Occ % cell.
+   It is a hardcoded constant in v27/v29/v30 — none of them read the payload's
+   occupancy_pct — so per-plan occupancy captured here does NOT reach the
+   proforma. Kept as a named constant so the Cell Map and the pre-flight warning
+   can never drift apart. */
+const POPULATOR_OCC_PCT = 0.95;
+
 // ============================================================================
 // Validation
 // ============================================================================
@@ -95,6 +102,18 @@ function collectChecks() {
 
   if (!(STATE.subjectUnitMix || []).some(rowHasData)) {
     out.push({ level: 'warn', msg: 'Subject unit mix is empty — the $/SF market-rent method and the Δ-vs-in-place column will be blank.' });
+  }
+
+  /* Occ % is captured per plan but no populator version transfers it — they all
+     write a flat 0.95. Say so, rather than let it look like it carried over. */
+  const withOcc = comps.filter(c => (c.unitMix || []).some(r => num(r.occ_pct) > 0));
+  if (withOcc.length) {
+    out.push({
+      level: 'warn',
+      msg: `Occupancy recorded on ${withOcc.length} comp(s) (${withOcc.map(c => c.name || '(unnamed)').join(', ')}) `
+        + `is kept in the tracker but NOT written to the proforma — populate_comps writes a flat `
+        + `${(POPULATOR_OCC_PCT * 100).toFixed(0)}% to every comp unit row. Adjust it in the workbook if it matters.`,
+    });
   }
 
   const rents = marketRentTable();
@@ -542,7 +561,12 @@ async function buildCompsWorkbook() {
           put(row, base + off.unitRowNum, who, tag + ' — row #', j + 1);
           put(row, base + off.unitCount, who, tag + ' — # units', numOrNull(r.count));
           put(row, base + off.unitSf, who, tag + ' — SF', numOrNull(r.sqft));
-          put(row, base + off.unitOccPct, who, tag + ' — Occ %', numOrNull(r.occ_pct));
+          /* Occ %: every populator version (v27/v29/v30) writes the CONSTANT
+             0.95 here and has never read occupancy_pct from the payload. Map
+             what actually gets written, or reconciliation reports a mismatch on
+             every unit row of every comp that has occupancy captured. */
+          put(row, base + off.unitOccPct, who, tag + ' — Occ % (populator constant)',
+            POPULATOR_OCC_PCT);
           put(row, base + off.unitAskRent, who, tag + ' — Ask $/Mo', numOrNull(r.ask_rent));
         });
       });
