@@ -563,7 +563,20 @@ async function exportWorkbook(opts) {
     const name = exportFileBase() + '.xlsx';
     const mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-    if (toDrive && driveConnected() && STATE.drive.folderId) {
+    if (toDrive && STATE.drive.folderId) {
+      /* The GIS token silently expires after ~1h. Without this reconnect the
+         export quietly fell back to a local download — on a phone that reads
+         as "export did nothing". */
+      if (!driveConnected()) {
+        toast('Drive session expired — reconnecting…');
+        const ok = await driveConnect();
+        if (!ok) {
+          toast('Could not reconnect — workbook downloaded locally instead');
+          const wbBlob = new Blob([buf], { type: mime });
+          downloadBlob(wbBlob, name);
+          return null;
+        }
+      }
       const folder = await ensureTrackerFolder(STATE);
       const hits = await driveList(
         `'${folder}' in parents and name='${name.replace(/'/g, "\\'")}' and trashed=false`, 'id,name');
@@ -585,8 +598,11 @@ async function exportWorkbook(opts) {
 
 /** Both artifacts into the deal folder in one action. */
 async function exportBothToDrive() {
-  if (!driveConnected()) { toast('Connect Google Drive first'); return; }
   if (!STATE.drive.folderId) { toast('Link a Drive deal folder first'); return; }
+  if (!driveConnected()) {
+    const ok = await driveConnect();
+    if (!ok) { toast('Connect Google Drive first'); return; }
+  }
   await exportWorkbook({ toDrive: true });
   try {
     const folder = await ensureTrackerFolder(STATE);
@@ -666,8 +682,8 @@ function renderPhase4() {
       <div class="card-head"><span class="grow">Then, on a machine with the proforma</span></div>
       <div class="card-body">
         <div class="muted small">Run the proven populator against the deal's proforma:</div>
-        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\rent-comp-data-populator-populate_comps-v27.py" ^
-  "&lt;proforma_in.xlsx&gt;" "&lt;proforma_out.xlsx&gt;" "$(cat ${esc(exportFileBase())}.json)" --skip-fetch</pre>
+        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\rent-comp-data-populator-populate_comps-v29.py" ^
+  "&lt;proforma_in.xlsx&gt;" "&lt;proforma_out.xlsx&gt;" "${esc(exportFileBase())}.json" --skip-fetch</pre>
         <div class="tiny muted" style="margin-top:6px">
           Then reconcile the populated COMPS tab against the <b>COMPS Cell Map</b> sheet.
         </div>

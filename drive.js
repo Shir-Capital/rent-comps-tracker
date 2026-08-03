@@ -275,23 +275,39 @@ function listFiles(parentId) {
 }
 
 /** Find a subfolder by name under parent, creating it if absent. */
+/* Two concurrent callers (e.g. the auto-push debounce and a backup, right after
+   linkDealFolder) can both list-then-create the same subfolder and leave a
+   duplicate on Drive. Memoize the in-flight promise per parent+name so
+   concurrent ensures share one create. */
+const ENSURE_INFLIGHT = new Map();
+
 async function driveEnsureSubfolder(parentId, name) {
-  const safe = name.replace(/'/g, "\\'");
-  const hits = await driveList(
-    `'${parentId}' in parents and name='${safe}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-    'id,name'
-  );
-  if (hits.length) return hits[0].id;
-  const created = await driveFetch('/drive/v3/files?fields=id&supportsAllDrives=true', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name,
-      mimeType: 'application/vnd.google-apps.folder',
-      parents: [parentId],
-    }),
-  });
-  return created.id;
+  const key = parentId + '/' + name;
+  if (ENSURE_INFLIGHT.has(key)) return ENSURE_INFLIGHT.get(key);
+  const job = (async () => {
+    const safe = name.replace(/'/g, "\\'");
+    const hits = await driveList(
+      `'${parentId}' in parents and name='${safe}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      'id,name'
+    );
+    if (hits.length) return hits[0].id;
+    const created = await driveFetch('/drive/v3/files?fields=id&supportsAllDrives=true', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentId],
+      }),
+    });
+    return created.id;
+  })();
+  ENSURE_INFLIGHT.set(key, job);
+  try {
+    return await job;
+  } finally {
+    ENSURE_INFLIGHT.delete(key);
+  }
 }
 
 async function driveGetMeta(fileId, fields) {
