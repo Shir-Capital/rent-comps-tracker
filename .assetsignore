@@ -1,9 +1,17 @@
-# Files in the assets directory that must NOT be served publicly.
-# Wrangler's static-assets uploader takes `assets.directory = "."`, which means the
-# whole repo root — including dotfolders — becomes fetchable unless excluded here.
-# The first deploy (2026-08-03) served /.git/config and every /.git/objects/* blob
-# over the public URL. Harmless on a public repo, but a full source disclosure on a
-# private one, so this file is the guard. gitignore-style syntax.
+# Files that must NOT be served publicly.
+#
+# This is a Cloudflare *Workers static assets* mechanism. Production is a Pages
+# project, which does not read this file — it is kept because the first deploy
+# (2026-08-03) went out as a Worker with `assets.directory = "."`, which published
+# the entire repo root including /.git/config and every /.git/objects/* blob.
+# Harmless on a public repo, a full source disclosure on a private one. If this
+# project is ever deployed as a Worker again, this guard is already in place.
+#
+# On Pages, verify the same thing with:
+#   curl -s -o /dev/null -w "%{http_code}\n" https://<host>/.git/config
+# and expect 404.
+#
+# gitignore-style syntax.
 
 .git
 .git/**
