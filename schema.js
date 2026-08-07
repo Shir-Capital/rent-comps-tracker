@@ -415,6 +415,7 @@ window.SCHEMA = {
       "type": "textarea"
     }
   ],
+  "_compFieldsNote": "PROPERTY BASICS — the facts that drive the COMPS tab, nothing else. `city`/`state`/`zip`/`stories`/`concession_months` are deliberately ABSENT as inputs but remain live keys on the record: HelloData still fills them and they still ride the export payload and the Comp Summary sheet. Dropping the input is a UI decision; dropping the key would silently lose data an import already gathered.",
   "compFields": [
     {
       "key": "name",
@@ -435,78 +436,44 @@ window.SCHEMA = {
       "note": "Street only — city/state/zip are stripped on export."
     },
     {
-      "key": "city",
-      "label": "City",
-      "type": "text",
-      "row": "citystzip"
-    },
-    {
-      "key": "state",
-      "label": "State",
-      "type": "text",
-      "row": "citystzip",
-      "maxlength": 2
-    },
-    {
-      "key": "zip",
-      "label": "ZIP",
-      "type": "text",
-      "row": "citystzip"
+      "key": "source",
+      "label": "Comp Source",
+      "type": "select",
+      "options_ref": "sources"
     },
     {
       "key": "year_built",
       "label": "Year Built",
-      "type": "number",
-      "row": "yrunits"
+      "type": "number"
     },
     {
       "key": "total_units",
-      "label": "Total Units",
-      "type": "number",
-      "row": "yrunits"
-    },
-    {
-      "key": "stories",
-      "label": "Stories",
-      "type": "number",
-      "row": "yrunits",
-      "note": "Tracker-only — v7 gave row-4 offset 2 to Distance, so stories has no COMPS cell."
+      "label": "Units",
+      "type": "number"
     },
     {
       "key": "distance_miles",
-      "label": "Distance (mi)",
+      "label": "Dist (mi)",
       "type": "number",
-      "step": "0.01",
-      "row": "distocc"
+      "step": "0.01"
     },
     {
       "key": "vacancy_pct",
-      "label": "Vacancy %",
+      "label": "Vac %",
       "type": "number",
-      "row": "distocc",
       "note": "Property-level, row 4 offset 3 (\"Vac:\"). Distinct from the per-floorplan Occ % on each unit row."
     },
     {
       "key": "concession_amount",
-      "label": "Concession $ (one-time)",
+      "label": "Conc $",
       "type": "number",
-      "row": "conc",
-      "note": "Row 4 offset 4. Feeds the R111:W123 roll-up and the Suggested Subject Concession."
-    },
-    {
-      "key": "concession_months",
-      "label": "…or months free",
-      "type": "number",
-      "step": "0.5",
-      "row": "conc",
-      "note": "Converted to $ by the populator (months x the comp's avg asking rent) when no dollar amount is given."
+      "note": "One-time concession, row 4 offset 4. Feeds the R111:W123 roll-up and the Suggested Subject Concession."
     },
     {
       "key": "wd_type",
-      "label": "W/D Type",
+      "label": "W/D",
       "type": "select",
       "options_ref": "wdTypes",
-      "row": "wdreno",
       "note": "Row 4 offset 6 — MANUAL analyst dropdown; the populator never writes it."
     },
     {
@@ -514,38 +481,7 @@ window.SCHEMA = {
       "label": "Utilities",
       "type": "select",
       "options_ref": "utilStructures",
-      "row": "wdreno",
       "note": "Row 4 offset 7 — MANUAL analyst dropdown; the populator never writes it."
-    },
-    {
-      "key": "reno_level",
-      "label": "Reno Level",
-      "type": "select",
-      "options_ref": "renoLevels",
-      "note": "Tracker-only — v7 has no per-comp reno cell (offset 7 is the utility structure)."
-    },
-    {
-      "key": "source",
-      "label": "Comp Source",
-      "type": "select",
-      "options_ref": "sources"
-    },
-    {
-      "key": "hellodata_id",
-      "label": "HelloData ID",
-      "type": "text"
-    },
-    {
-      "key": "phone",
-      "label": "Leasing Phone",
-      "type": "tel",
-      "row": "contact"
-    },
-    {
-      "key": "contact_name",
-      "label": "Contact",
-      "type": "text",
-      "row": "contact"
     },
     {
       "key": "website",
@@ -553,64 +489,89 @@ window.SCHEMA = {
       "type": "url"
     },
     {
+      "key": "hellodata_id",
+      "label": "HelloData ID",
+      "type": "text"
+    },
+    {
       "key": "notes",
       "label": "Notes",
       "type": "textarea"
     }
   ],
+  "_compExtraFieldsNote": "Moved out of Property Basics: still captured, still exported, just not part of the at-a-glance underwriting picture. Rendered in the collapsed 'More' card with the tracker-only fees.",
+  "compExtraFields": [
+    {
+      "key": "phone",
+      "label": "Leasing Phone",
+      "type": "tel"
+    },
+    {
+      "key": "contact_name",
+      "label": "Contact",
+      "type": "text"
+    },
+    {
+      "key": "reno_level",
+      "label": "Reno Level",
+      "type": "select",
+      "options_ref": "renoLevels",
+      "note": "Tracker-only — v7 has no per-comp reno cell (offset 7 is the utility structure)."
+    }
+  ],
   "fees": [
     {
       "key": "amenity",
-      "label": "Amenity / Mo",
+      "label": "Amenity",
       "type": "number",
       "compsRow": 79,
       "row": "tfee1"
     },
     {
       "key": "insurance",
-      "label": "Insurance / Mo",
+      "label": "Insurance",
       "type": "number",
       "compsRow": 80,
       "row": "tfee1"
     },
     {
       "key": "pest",
-      "label": "Pest / Mo",
+      "label": "Pest",
       "type": "number",
       "compsRow": 81,
       "row": "tfee2"
     },
     {
       "key": "parking",
-      "label": "Parking / Mo",
+      "label": "Parking",
       "type": "number",
       "compsRow": 82,
       "row": "tfee2"
     },
     {
       "key": "cleaning",
-      "label": "Cleaning / Mo",
+      "label": "Cleaning",
       "type": "number",
       "compsRow": 83,
       "row": "tfee3"
     },
     {
       "key": "cable_internet",
-      "label": "Cable/Internet / Mo",
+      "label": "Cable/Internet",
       "type": "number",
       "compsRow": 84,
       "row": "tfee3"
     },
     {
       "key": "utilities",
-      "label": "Utilities / Mo",
+      "label": "Utilities",
       "type": "number",
       "compsRow": 85,
       "row": "tfee4"
     },
     {
       "key": "wd",
-      "label": "W/D / Mo",
+      "label": "W/D",
       "type": "number",
       "compsRow": 86,
       "row": "tfee4"
