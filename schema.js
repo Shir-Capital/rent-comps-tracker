@@ -3,8 +3,8 @@
 // Rebuild: python Accessories/build_schema.py
 window.SCHEMA = {
   "compsTab": {
-    "templateVersion": "SHIR_MF_Template_v3",
-    "populatorScript": "rent-comp-data-populator-populate_comps-v30.py",
+    "templateVersion": "SHIR_MF_Template_v7",
+    "populatorScript": "rent-comp-data-populator-populate_comps-v35.py",
     "compBaseCols": [
       25,
       34,
@@ -17,16 +17,31 @@ window.SCHEMA = {
     ],
     "compBlockWidth": 9,
     "maxComps": 8,
+    "templateSlots": 10,
+    "templateSlotBaseCols": [
+      25,
+      34,
+      43,
+      52,
+      61,
+      70,
+      79,
+      88,
+      97,
+      106
+    ],
+    "reservedSlotNote": "The v7 COMPS tab has ten comp slots (through DB), but slots 9-10 (CS, DB) are deliberately never populated: populate_comps v34/v35 read their pristine offset-0 columns as the reference for restoring unit line-# serials a pre-v34 run clobbered. Filling them destroys that reference, so maxComps stays 8.",
     "rowHeader": 3,
     "rowDetails": 4,
     "rowColHeaders": 5,
-    "rowTotals": 86,
-    "rowCompType": 87,
-    "rowAttrHeader": 88,
-    "attrRowFirst": 89,
-    "attrRowLast": 97,
-    "feeRowFirst": 89,
-    "feeRowLast": 96,
+    "rowTotals": 76,
+    "rowCompType": 77,
+    "rowAttrHeader": 78,
+    "attrRowFirst": 79,
+    "attrRowLast": 87,
+    "feeRowFirst": 79,
+    "feeRowLast": 86,
+    "feeSumLastRow": 87,
     "subjectMktRentCol": 7,
     "subjectUnitCountCol": 3,
     "offsets": {
@@ -35,10 +50,12 @@ window.SCHEMA = {
       "compAddress": 7,
       "yearBuilt": 0,
       "totalUnits": 1,
-      "stories": 2,
-      "distanceMiles": 3,
-      "wdType": 4,
-      "renoLevel": 5,
+      "distanceMiles": 2,
+      "vacancyPct": 3,
+      "concessionDollars": 4,
+      "concessionPct": 5,
+      "wdType": 6,
+      "utilStructure": 7,
       "unitRowNum": 0,
       "unitCount": 1,
       "unitSf": 2,
@@ -48,7 +65,8 @@ window.SCHEMA = {
       "unitEffRent": 6,
       "unitEffPsf": 7,
       "compTypeValue": 2,
-      "compSourceValue": 4,
+      "compSourceValue": 5,
+      "compSourceLegacyValue": 4,
       "physicalValue": 2,
       "amenityValue": 5,
       "feeLabel": 6,
@@ -62,8 +80,8 @@ window.SCHEMA = {
       "short": "Eff",
       "compsLabel": "+Eff",
       "startRow": 6,
-      "endRow": 15,
-      "subtotalRow": 16,
+      "endRow": 14,
+      "subtotalRow": 15,
       "beds": 0,
       "baths": 1
     },
@@ -72,9 +90,9 @@ window.SCHEMA = {
       "label": "1BR / 1BA",
       "short": "1x1",
       "compsLabel": "+1/1(.5)",
-      "startRow": 17,
-      "endRow": 26,
-      "subtotalRow": 27,
+      "startRow": 16,
+      "endRow": 24,
+      "subtotalRow": 25,
       "beds": 1,
       "baths": 1
     },
@@ -83,9 +101,9 @@ window.SCHEMA = {
       "label": "2BR / 1BA",
       "short": "2x1",
       "compsLabel": "+2x1(.5)",
-      "startRow": 28,
-      "endRow": 37,
-      "subtotalRow": 38,
+      "startRow": 26,
+      "endRow": 34,
+      "subtotalRow": 35,
       "beds": 2,
       "baths": 1
     },
@@ -94,9 +112,9 @@ window.SCHEMA = {
       "label": "2BR / 2BA",
       "short": "2x2",
       "compsLabel": "+2x2(.5)",
-      "startRow": 39,
-      "endRow": 49,
-      "subtotalRow": 50,
+      "startRow": 36,
+      "endRow": 44,
+      "subtotalRow": 45,
       "beds": 2,
       "baths": 2
     },
@@ -105,9 +123,9 @@ window.SCHEMA = {
       "label": "3BR / 1BA",
       "short": "3x1",
       "compsLabel": "+3/1(.5)",
-      "startRow": 51,
-      "endRow": 61,
-      "subtotalRow": 62,
+      "startRow": 46,
+      "endRow": 54,
+      "subtotalRow": 55,
       "beds": 3,
       "baths": 1
     },
@@ -116,9 +134,9 @@ window.SCHEMA = {
       "label": "3BR / 2BA",
       "short": "3x2",
       "compsLabel": "+3/2(.5)",
-      "startRow": 63,
-      "endRow": 72,
-      "subtotalRow": 73,
+      "startRow": 56,
+      "endRow": 64,
+      "subtotalRow": 65,
       "beds": 3,
       "baths": 2
     },
@@ -127,9 +145,9 @@ window.SCHEMA = {
       "label": "4BR / 2BA",
       "short": "4x2",
       "compsLabel": "+4/2(.5)",
-      "startRow": 74,
-      "endRow": 84,
-      "subtotalRow": 85,
+      "startRow": 66,
+      "endRow": 74,
+      "subtotalRow": 75,
       "beds": 4,
       "baths": 2
     }
@@ -138,55 +156,55 @@ window.SCHEMA = {
     {
       "key": "hvac_indiv",
       "label": "HVAC Indiv.",
-      "row": 89,
+      "row": 79,
       "hellodata": "central_air_conditioning"
     },
     {
       "key": "wd_inunit",
       "label": "W/D In-Unit",
-      "row": 90,
+      "row": 80,
       "hellodata": "washer_dryer_in_unit"
     },
     {
       "key": "wd_hookups",
       "label": "W/D Hookups",
-      "row": 91,
+      "row": 81,
       "hellodata": "washer_dryer_hookups"
     },
     {
       "key": "water_util",
       "label": "Water Util.",
-      "row": 92,
+      "row": 82,
       "hellodata": null
     },
     {
       "key": "gas_util",
       "label": "Gas Util.",
-      "row": 93,
+      "row": 83,
       "hellodata": null
     },
     {
       "key": "elec_util",
       "label": "Elec. Util.",
-      "row": 94,
+      "row": 84,
       "hellodata": null
     },
     {
       "key": "roof_type",
       "label": "Roof Type",
-      "row": 95,
+      "row": 85,
       "hellodata": null
     },
     {
       "key": "priv_yards",
       "label": "Priv. Yards",
-      "row": 96,
+      "row": 86,
       "hellodata": "patio_or_balcony"
     },
     {
       "key": "indiv_hwh",
       "label": "Indiv. HWH",
-      "row": 97,
+      "row": 87,
       "hellodata": null
     }
   ],
@@ -194,55 +212,55 @@ window.SCHEMA = {
     {
       "key": "fitness_center",
       "label": "Fitness Center",
-      "row": 89,
+      "row": 79,
       "hellodata": "fitness_center"
     },
     {
       "key": "clubhouse",
       "label": "Clubhouse",
-      "row": 90,
+      "row": 80,
       "hellodata": "club_house_party_room"
     },
     {
       "key": "business_center",
       "label": "Business Center",
-      "row": 91,
+      "row": 81,
       "hellodata": "business_center"
     },
     {
       "key": "pool",
       "label": "Pool",
-      "row": 92,
+      "row": 82,
       "hellodata": "swimming_pool"
     },
     {
       "key": "dog_park",
       "label": "Dog Park",
-      "row": 93,
+      "row": 83,
       "hellodata": "dog_park"
     },
     {
       "key": "bbq_grill",
       "label": "BBQ/Grill Area",
-      "row": 94,
+      "row": 84,
       "hellodata": "barbecue_grill"
     },
     {
       "key": "gated",
       "label": "Gated Access",
-      "row": 95,
+      "row": 85,
       "hellodata": "gated_community_access"
     },
     {
       "key": "sport_court",
       "label": "Sport Court",
-      "row": 96,
+      "row": 86,
       "hellodata": "basketball_court"
     },
     {
       "key": "playground",
       "label": "Playground",
-      "row": 97,
+      "row": 87,
       "hellodata": "playground"
     }
   ],
@@ -270,10 +288,16 @@ window.SCHEMA = {
     }
   ],
   "wdTypes": [
+    "No W/D",
     "W/D IU",
-    "W/D Conn",
-    "Comm. Laundry",
-    "None"
+    "W/D HU"
+  ],
+  "utilStructures": [
+    "ABP",
+    "W+G-R",
+    "W-R",
+    "E+W+G-R",
+    "Fixed"
   ],
   "renoLevels": [
     "Orig",
@@ -355,7 +379,8 @@ window.SCHEMA = {
       "key": "occupancy_pct",
       "label": "Occupancy %",
       "type": "number",
-      "row": "occwd"
+      "row": "occwd",
+      "note": "Tracker-only — the subject's COMPS row-4 vacancy cell (D4) is a formula off DASH!N5."
     },
     {
       "key": "wd_type",
@@ -365,11 +390,18 @@ window.SCHEMA = {
       "row": "occwd"
     },
     {
+      "key": "util_structure",
+      "label": "Utilities",
+      "type": "select",
+      "options_ref": "utilStructures",
+      "row": "occwd",
+      "note": "Subject COMPS!H4 — MANUAL analyst dropdown."
+    },
+    {
       "key": "reno_level",
       "label": "Reno Level",
       "type": "select",
-      "options_ref": "renoLevels",
-      "row": "occwd"
+      "options_ref": "renoLevels"
     },
     {
       "key": "hellodata_id",
@@ -437,7 +469,8 @@ window.SCHEMA = {
       "key": "stories",
       "label": "Stories",
       "type": "number",
-      "row": "yrunits"
+      "row": "yrunits",
+      "note": "Tracker-only — v7 gave row-4 offset 2 to Distance, so stories has no COMPS cell."
     },
     {
       "key": "distance_miles",
@@ -447,24 +480,49 @@ window.SCHEMA = {
       "row": "distocc"
     },
     {
-      "key": "occupancy_pct",
-      "label": "Occupancy %",
+      "key": "vacancy_pct",
+      "label": "Vacancy %",
       "type": "number",
-      "row": "distocc"
+      "row": "distocc",
+      "note": "Property-level, row 4 offset 3 (\"Vac:\"). Distinct from the per-floorplan Occ % on each unit row."
+    },
+    {
+      "key": "concession_amount",
+      "label": "Concession $ (one-time)",
+      "type": "number",
+      "row": "conc",
+      "note": "Row 4 offset 4. Feeds the R111:W123 roll-up and the Suggested Subject Concession."
+    },
+    {
+      "key": "concession_months",
+      "label": "…or months free",
+      "type": "number",
+      "step": "0.5",
+      "row": "conc",
+      "note": "Converted to $ by the populator (months x the comp's avg asking rent) when no dollar amount is given."
     },
     {
       "key": "wd_type",
       "label": "W/D Type",
       "type": "select",
       "options_ref": "wdTypes",
-      "row": "wdreno"
+      "row": "wdreno",
+      "note": "Row 4 offset 6 — MANUAL analyst dropdown; the populator never writes it."
+    },
+    {
+      "key": "util_structure",
+      "label": "Utilities",
+      "type": "select",
+      "options_ref": "utilStructures",
+      "row": "wdreno",
+      "note": "Row 4 offset 7 — MANUAL analyst dropdown; the populator never writes it."
     },
     {
       "key": "reno_level",
       "label": "Reno Level",
       "type": "select",
       "options_ref": "renoLevels",
-      "row": "wdreno"
+      "note": "Tracker-only — v7 has no per-comp reno cell (offset 7 is the utility structure)."
     },
     {
       "key": "source",
@@ -505,56 +563,56 @@ window.SCHEMA = {
       "key": "amenity",
       "label": "Amenity / Mo",
       "type": "number",
-      "compsRow": 89,
+      "compsRow": 79,
       "row": "tfee1"
     },
     {
       "key": "insurance",
       "label": "Insurance / Mo",
       "type": "number",
-      "compsRow": 90,
+      "compsRow": 80,
       "row": "tfee1"
     },
     {
       "key": "pest",
       "label": "Pest / Mo",
       "type": "number",
-      "compsRow": 91,
+      "compsRow": 81,
       "row": "tfee2"
     },
     {
       "key": "parking",
       "label": "Parking / Mo",
       "type": "number",
-      "compsRow": 92,
+      "compsRow": 82,
       "row": "tfee2"
     },
     {
       "key": "cleaning",
       "label": "Cleaning / Mo",
       "type": "number",
-      "compsRow": 93,
+      "compsRow": 83,
       "row": "tfee3"
     },
     {
       "key": "cable_internet",
       "label": "Cable/Internet / Mo",
       "type": "number",
-      "compsRow": 94,
+      "compsRow": 84,
       "row": "tfee3"
     },
     {
       "key": "utilities",
       "label": "Utilities / Mo",
       "type": "number",
-      "compsRow": 95,
+      "compsRow": 85,
       "row": "tfee4"
     },
     {
       "key": "wd",
       "label": "W/D / Mo",
       "type": "number",
-      "compsRow": 96,
+      "compsRow": 86,
       "row": "tfee4"
     },
     {
