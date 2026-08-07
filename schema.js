@@ -321,6 +321,7 @@ window.SCHEMA = {
     "CoStar",
     "Other"
   ],
+  "_subjectFieldsNote": "Order is load-bearing: on desktop these fill a 12-column grid in source order, and the spans in styles.css are chosen so the 14 fields land in exactly three rows (identity+market / location+size / condition+notes). Reordering or adding a field without adjusting the spans will push it to a fourth row. `reno_level` was removed 2026-08-07 — the subject's finish is captured per floor plan in the unit mix, which is where it actually varies.",
   "subjectFields": [
     {
       "key": "name",
@@ -331,6 +332,11 @@ window.SCHEMA = {
     {
       "key": "address",
       "label": "Street Address",
+      "type": "text"
+    },
+    {
+      "key": "msa",
+      "label": "MSA / Submarket",
       "type": "text"
     },
     {
@@ -351,11 +357,6 @@ window.SCHEMA = {
       "label": "ZIP",
       "type": "text",
       "row": "citystzip"
-    },
-    {
-      "key": "msa",
-      "label": "MSA / Submarket",
-      "type": "text"
     },
     {
       "key": "year_built",
@@ -396,12 +397,6 @@ window.SCHEMA = {
       "options_ref": "utilStructures",
       "row": "occwd",
       "note": "Subject COMPS!H4 — MANUAL analyst dropdown."
-    },
-    {
-      "key": "reno_level",
-      "label": "Reno Level",
-      "type": "select",
-      "options_ref": "renoLevels"
     },
     {
       "key": "hellodata_id",
