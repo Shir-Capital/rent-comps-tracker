@@ -45,10 +45,14 @@ function fieldHtml(f, obj, path) {
     control = `<input type="${t}" ${extra} ${dsa} value="${esc(v)}" />`;
   }
 
-  return `<div class="field" data-row="${esc(f.row || '')}">
-    <label>${esc(f.label)}</label>
+  /* The note rides as a tooltip on the label rather than a line under the input.
+     Nine fields carry one, and rendered inline they added ~9 lines of prose to
+     a card that has to fit on one screen. The label gets a dotted underline so
+     there is still a visible cue that an explanation exists. */
+  const hint = f.note ? ` title="${esc(f.note)}"` : '';
+  return `<div class="field" data-row="${esc(f.row || '')}" data-fld="${esc(f.key)}">
+    <label${hint}${f.note ? ' class="has-note"' : ''}>${esc(f.label)}</label>
     ${control}
-    ${f.note ? `<div class="note">${esc(f.note)}</div>` : ''}
   </div>`;
 }
 
@@ -742,48 +746,48 @@ function renderCompEditor(compId) {
     </div>
 
     <div class="card">
-      <div class="card-head"><span class="grow">Unit Mix &amp; Asking Rents</span></div>
+      <div class="card-head" title="One row per floor plan. Beds/Baths decide which COMPS section the plan lands in. Leave Ask $/Mo blank if you could not get it — blanks are skipped, not counted as $0.">
+        <span class="grow">Unit Mix &amp; Asking Rents</span>
+        ${st.planCount ? `<span class="head-stat">${st.avgRent > 0 ? 'avg ' + money(st.avgRent) : ''}${st.psf > 0 ? ' · $' + st.psf.toFixed(2) + '/SF' : ''}${st.minRent > 0 ? ' · ' + money(st.minRent) + '–' + money(st.maxRent) : ''}</span>` : ''}
+      </div>
       <div class="card-body">
-        <div class="muted small" style="margin-bottom:7px">
+        <div class="card-hint">
           One row per floor plan. Beds/Baths decide which COMPS section the plan
           lands in. Leave <b>Ask $/Mo</b> blank if you could not get it — blanks
           are skipped, not counted as $0.
         </div>
         <div data-umix-host="${esc(path)}">${unitMixBlockHtml(c.unitMix, 'comp', path)}</div>
-        ${st.planCount ? `<hr class="hr-soft"/>
-          <div class="kv"><span class="k">Avg asking rent</span><span class="v">${st.avgRent > 0 ? money(st.avgRent) : '—'}</span></div>
-          <div class="kv"><span class="k">Avg $/SF</span><span class="v">${st.psf > 0 ? '$' + st.psf.toFixed(2) : '—'}</span></div>
-          <div class="kv"><span class="k">Rent range</span><span class="v">${st.minRent > 0 ? money(st.minRent) + ' – ' + money(st.maxRent) : '—'}</span></div>` : ''}
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-head"><span class="grow">Physical Attributes</span></div>
-      <div class="card-body">
-        <div class="muted small" style="margin-bottom:7px">Leave “—” when you don't know.
-          A blank cell is an honest gap; “N” claims the comp positively lacks it.</div>
-        ${triHtml(PHYSICAL, c.physical, path + '.physical')}
+    <div class="card-pair">
+      <div class="card">
+        <div class="card-head" title="Leave “—” when you don't know. A blank cell is an honest gap; “N” claims the comp positively lacks it.">
+          <span class="grow">Physical Attributes</span>
+        </div>
+        <div class="card-body">
+          <div class="card-hint">Leave “—” when you don't know.
+            A blank cell is an honest gap; “N” claims the comp positively lacks it.</div>
+          ${triHtml(PHYSICAL, c.physical, path + '.physical')}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span class="grow">Amenities</span></div>
+        <div class="card-body">${triHtml(AMENITIES, c.amenities, path + '.amenities')}</div>
       </div>
     </div>
 
-    <div class="card">
-      <div class="card-head"><span class="grow">Amenities</span></div>
-      <div class="card-body">${triHtml(AMENITIES, c.amenities, path + '.amenities')}</div>
-    </div>
-
-    <div class="card${COLLAPSED.has('fees:' + c.compId) ? ' collapsed' : ''}" data-cardkey="fees:${esc(c.compId)}">
-      <div class="card-head" data-cardtoggle="fees:${esc(c.compId)}">
-        <span class="chev">${COLLAPSED.has('fees:' + c.compId) ? '▶' : '▼'}</span>
+    <div class="card${COLLAPSED.has('fees:' + c.compId) ? '' : ' collapsed'}" data-cardkey="fees:${esc(c.compId)}">
+      <div class="card-head" data-cardtoggle="fees:${esc(c.compId)}" data-cardinvert="1"
+           title="Required monthly fees are charged to ALL tenants and go into the COMPS FEES $/Mo column, feeding the template's Eff. $/Mo formulas. Leave blank when unknown — never guess. The tracker-only fees below are one-time or optional and are not written to the COMPS tab.">
+        <span class="chev">${COLLAPSED.has('fees:' + c.compId) ? '▼' : '▶'}</span>
         <span class="grow">Fees &amp; Other Income</span>
       </div>
       <div class="card-body">
-        <div class="muted small" style="margin-bottom:7px"><b>Required monthly fees</b> — charged to
-          ALL tenants. These go into the COMPS <b>FEES $/Mo</b> column and feed the template's
-          Eff. $/Mo formulas. Leave blank when unknown — never guess.</div>
+        <div class="sub-label" title="Charged to ALL tenants. Written to the COMPS FEES $/Mo column and fed into the template's Eff. $/Mo formulas. Leave blank when unknown — never guess.">Required monthly → COMPS FEES column</div>
         ${fieldsHtml((SCHEMA.fees || []).filter(f => f.compsRow), c.fees, path + '.fees')}
-        <hr class="hr-soft"/>
-        <div class="muted small" style="margin-bottom:7px">Tracker-only (one-time / optional) — these
-          are not written to the COMPS tab, but they travel in the export JSON.</div>
+        <div class="sub-label" title="One-time or optional charges. Not written to the COMPS tab, but they travel in the export JSON.">Tracker-only (one-time / optional)</div>
         ${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsRow), c.fees, path + '.fees')}
       </div>
     </div>`;
@@ -798,12 +802,17 @@ function renderCompEditor(compId) {
   };
   $('#btn-comp-hd').onclick = () => hdFillComp(c.compId);
 
+  /* `data-cardinvert` flips the key's meaning from "collapsed" to "opened", the
+     same convention the unit-mix rows use. Cards that start closed need it, or
+     the absent key would read as "expanded" on every re-render. */
   $$('[data-cardtoggle]', host).forEach(n => n.addEventListener('click', () => {
     const key = n.getAttribute('data-cardtoggle');
+    const invert = n.getAttribute('data-cardinvert') === '1';
     const card = n.closest('.card');
     const nowCollapsed = !card.classList.contains('collapsed');
     card.classList.toggle('collapsed', nowCollapsed);
-    if (nowCollapsed) COLLAPSED.add(key); else COLLAPSED.delete(key);
+    const remember = invert ? !nowCollapsed : nowCollapsed;
+    if (remember) COLLAPSED.add(key); else COLLAPSED.delete(key);
     const ch = $('.chev', n);
     if (ch) ch.textContent = nowCollapsed ? '▶' : '▼';
   }));
