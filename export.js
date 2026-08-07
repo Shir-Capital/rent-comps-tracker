@@ -722,6 +722,7 @@ async function exportBothToDrive() {
 
 function renderPhase4() {
   const host = $('#phase-content');
+  host.classList.remove('narrow');
   const checks = collectChecks();
   const errs = checks.filter(c => c.level === 'err').length;
   const comps = sortedComps();
