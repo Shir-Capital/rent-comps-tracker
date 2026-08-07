@@ -703,8 +703,9 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
       52px 52px            /* Beds, Baths */
       66px 62px            /* SF, # Units */
       82px 60px            /* Ask $/Mo, Occ % */
-      minmax(90px, 1fr)    /* Concession */
-      minmax(90px, 1.2fr)  /* Notes */
+      88px                 /* Status */
+      minmax(84px, 1fr)    /* Concession */
+      minmax(84px, 1.1fr)  /* Notes */
       62px;                /* actions */
   }
   .umix-subject .umix-head, .umix-subject .urow-body {

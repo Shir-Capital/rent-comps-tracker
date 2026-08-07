@@ -323,7 +323,7 @@ function newComp() {
 }
 
 function newUnitRow() {
-  return { id: uid(), plan: '', beds: '', baths: '', sqft: '', count: '', occ_pct: '', ask_rent: '', concession: '', notes: '' };
+  return { id: uid(), plan: '', beds: '', baths: '', sqft: '', count: '', occ_pct: '', ask_rent: '', status: '', concession: '', notes: '' };
 }
 function newSubjectUnitRow() {
   return { id: uid(), plan: '', beds: '', baths: '', sqft: '', count: '', status: '', current_rent: '' };
