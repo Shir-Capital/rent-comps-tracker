@@ -631,13 +631,44 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   .comp-card .field,
   [data-cardkey^="more:"] .field { margin-bottom: 0; grid-column: span 2; }
 
-  .field[data-fld="year_built"], .field[data-fld="total_units"],
-  .field[data-fld="distance_miles"], .field[data-fld="vacancy_pct"],
-  .field[data-fld="concession_amount"], .field[data-fld="wd_type"] { grid-column: span 1; }
-  .field[data-fld="name"], .field[data-fld="address"],
-  .field[data-fld="category"], .field[data-fld="source"],
-  .field[data-fld="website"] { grid-column: span 3; }
-  .field[data-fld="notes"] { grid-column: span 7; }
+  /* Scoped to .comp-card on purpose. Unscoped, these spans also hit the subject
+     card and the unit table, which have their own column plans — the unit rows
+     only escaped because a later `grid-column: auto` happened to override them. */
+  .comp-card .field[data-fld="year_built"], .comp-card .field[data-fld="total_units"],
+  .comp-card .field[data-fld="distance_miles"], .comp-card .field[data-fld="vacancy_pct"],
+  .comp-card .field[data-fld="concession_amount"], .comp-card .field[data-fld="wd_type"] { grid-column: span 1; }
+  .comp-card .field[data-fld="name"], .comp-card .field[data-fld="address"],
+  .comp-card .field[data-fld="category"], .comp-card .field[data-fld="source"],
+  .comp-card .field[data-fld="website"] { grid-column: span 3; }
+  .comp-card .field[data-fld="notes"] { grid-column: span 7; }
+
+  /* ---------------------------------------------------- subject property */
+  /* Fourteen fields in exactly three rows. The spans below sum to 12 per row in
+     schema source order, so no field can drift to a fourth line — which also
+     means adding one to subjectFields requires re-balancing these. */
+  .subject-card > .card-body {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 6px 8px;
+    align-items: end;
+  }
+  .subject-card > .card-body > .field-row { display: contents; }
+  .subject-card .field { margin-bottom: 0; grid-column: span 2; }
+
+  /* row 1 — identity + market */
+  .subject-card .field[data-fld="name"],
+  .subject-card .field[data-fld="address"],
+  .subject-card .field[data-fld="msa"] { grid-column: span 4; }
+  /* row 2 — location + size */
+  .subject-card .field[data-fld="city"] { grid-column: span 3; }
+  .subject-card .field[data-fld="state"] { grid-column: span 1; }
+  /* zip, year_built, total_units, stories inherit span 2 — 3+1+2+2+2+2 = 12 */
+  /* row 3 — condition + notes; occ/wd/util/hellodata inherit span 2 */
+  .subject-card .field[data-fld="notes"] { grid-column: span 4; }
+  .subject-card textarea { min-height: 30px; line-height: 1.3; }
+  .subject-card input, .subject-card select, .subject-card textarea {
+    font-size: 14px; padding: 4px 6px; min-height: 30px; border-radius: 6px;
+  }
 
   [data-cardkey^="more:"] > .card-body > .sub-label { grid-column: 1 / -1; margin: 4px 0 0; }
 
@@ -746,6 +777,13 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   }
   .icon-btn { font-size: 14px; padding: 4px 7px; }
   .card-body > .btn-row[style] { margin-top: 4px !important; }
+
+  /* ------------------------------------------------------- page width */
+  /* The comps tab needs the full 1320px for a 12-column unit table beside three
+     attribute cards. The subject tab does not: one property, and its widest
+     element is a 9-column table around 650px. `narrow` is set by renderPhase1
+     and cleared by every other phase. */
+  #phase-content.narrow { max-width: 900px; margin: 0 auto; }
 }
 
 /* Wide enough for three pairs across inside each of the three cards: nine
