@@ -260,12 +260,24 @@ function hydrateProperty(p) {
   }, p.drive || {});
   delete p.asana;   // Asana integration removed 2026-08-03; drop it from old records
   p.subject = p.subject || {};
+  if (p.subject.util_structure === undefined) p.subject.util_structure = '';
+  if (p.subject.wd_type && WD_TYPE_MIGRATION[p.subject.wd_type]) {
+    p.subject.wd_type = WD_TYPE_MIGRATION[p.subject.wd_type];
+  }
   if (!Array.isArray(p.subjectUnitMix)) p.subjectUnitMix = [];
   if (!Array.isArray(p.comps)) p.comps = [];
   p.marketRents = p.marketRents || {};
   p.comps.forEach(c => hydrateComp(c));
   return p;
 }
+
+/* Pre-v7 W/D values came from a list the COMPS dropdown never had. Map them onto
+   the template's own three options so an old record still matches its cell. */
+const WD_TYPE_MIGRATION = {
+  'W/D Conn': 'W/D HU',
+  'Comm. Laundry': 'No W/D',
+  'None': 'No W/D',
+};
 
 function hydrateComp(c) {
   if (!c.compId) c.compId = uid();
@@ -274,6 +286,19 @@ function hydrateComp(c) {
   c.amenities = Object.assign(blankAmenities(), c.amenities || {});
   c.fees = Object.assign(blankFees(), c.fees || {});
   if (!c.category) c.category = '';
+
+  /* v7 migration. Records captured against the v3 geometry stored a
+     property-level `occupancy_pct`; the cell it was headed for is the VACANCY
+     cell (row 4 offset 3), so invert rather than drop. Per-floorplan occ_pct on
+     the unit rows is a different field and is left alone. */
+  if (c.vacancy_pct === undefined) {
+    const occ = num(c.occupancy_pct);
+    c.vacancy_pct = occ > 0 && occ <= 100 ? String(Number((100 - occ).toFixed(1))) : '';
+  }
+  if (c.concession_amount === undefined) c.concession_amount = '';
+  if (c.concession_months === undefined) c.concession_months = '';
+  if (c.util_structure === undefined) c.util_structure = '';
+  if (c.wd_type && WD_TYPE_MIGRATION[c.wd_type]) c.wd_type = WD_TYPE_MIGRATION[c.wd_type];
   return c;
 }
 
@@ -283,8 +308,9 @@ function newComp() {
     name: '', address: '', city: '', state: '', zip: '',
     category: '',
     year_built: '', total_units: '', stories: '',
-    distance_miles: '', occupancy_pct: '',
-    wd_type: '', reno_level: '',
+    distance_miles: '', vacancy_pct: '',
+    concession_amount: '', concession_months: '',
+    wd_type: '', util_structure: '', reno_level: '',
     source: '', hellodata_id: '',
     phone: '', contact_name: '', website: '',
     visited_at: '', visited_by: '',
