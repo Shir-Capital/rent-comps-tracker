@@ -194,7 +194,31 @@ main { padding: 10px 10px 96px; max-width: 900px; margin: 0 auto; }
   margin: 2px 0 5px; cursor: help;
 }
 .card > .card-head .head-stat { font-size: 12px; font-weight: 500; opacity: .85; white-space: nowrap; }
-.card-pair > .card { flex: 1 1 0; min-width: 0; }
+.card-pair > .card, .card-trio > .card { flex: 1 1 0; min-width: 0; }
+
+/* Row actions inside a unit-mix line. Icons rather than words: the row is a
+   table line, and "Delete plan" / "Duplicate" spelled out cost more width than
+   every numeric column combined. Both keep a title + aria-label. */
+.urow-acts { display: flex; gap: 4px; justify-content: flex-end; }
+.icon-btn {
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+.icon-btn:hover { background: #f1f5f9; color: var(--ink); }
+.icon-btn.danger { color: var(--err); border-color: #fca5a5; }
+.icon-btn.danger:hover { background: var(--err-bg); }
+
+/* Column headings for the desktop unit-mix table; the phone uses the accordion
+   bar instead, so this is hidden below 900px. */
+.umix-head { display: none; }
+.fee-cell input { text-align: right; }
 
 input[type="text"], input[type="number"], input[type="tel"], input[type="url"],
 input[type="date"], select, textarea {
@@ -547,120 +571,145 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
 .stack { display: flex; flex-direction: column; gap: 8px; }
 
 /* ============================================================================
-   DESKTOP COMPACT MODE  (>= 900px)
+   DESKTOP MODE  (>= 900px)
    ----------------------------------------------------------------------------
-   Deliberately scoped to a media query rather than applied globally. This is a
-   phone-first field-capture tool: the 16px input font stops iOS zooming on
-   focus, and the 38px control height is a thumb target. Shrinking those on a
-   phone would damage the primary use case to help the secondary one. Everything
-   below applies only where there is a mouse and a wide screen.
+   Scoped to a media query, not applied globally. This is a phone-first
+   field-capture tool: the 16px input font is what stops iOS zooming the
+   viewport on focus, and the 38px control height is a thumb target. Shrinking
+   either on a phone would damage the primary use case (standing in a leasing
+   office) to help the secondary one (reviewing at a desk).
 
-   Goal: one comp — details, unit mix, attributes, amenities — on one screen.
+   Layout at this width:
+     1. Property Basics  — 12-column grid, each field only as wide as its value
+     2. Unit Mix         — one table line per floor plan, labels printed once
+     3. Attributes       — three tables side by side, one line item per row
    ========================================================================= */
 @media (min-width: 900px) {
 
-  main { max-width: 1280px; padding: 7px 12px 40px; }
+  main { max-width: 1320px; padding: 8px 12px 40px; }
 
-  /* The header and tab strip are sized for thumbs. With a mouse they can give
-     back ~20px, which is the difference between fitting a 768px laptop or not. */
-  :root { --header-h: 42px; --tabs-h: 34px; }
-  .app-header .title { font-size: 17px; }
-  .app-header .logo { height: 22px; }
-  .phase-tabs .tab { font-size: 14px; }
+  /* Header and tab strip are thumb-sized; with a mouse they can give back ~18px. */
+  :root { --header-h: 44px; --tabs-h: 36px; }
+  .app-header .title { font-size: 18px; }
+  .app-header .logo { height: 23px; }
+  .phase-tabs .tab { font-size: 14.5px; }
 
   /* -------------------------------------------------------------- chrome */
-  .card { margin-bottom: 6px; border-radius: 8px; }
-  .card > .card-head { padding: 4px 10px; font-size: 13px; }
-  .card > .card-body { padding: 6px 9px; }
+  .card { margin-bottom: 7px; border-radius: 8px; }
+  .card > .card-head { padding: 5px 10px; font-size: 14.5px; }
+  .card > .card-body { padding: 7px 9px; }
   .hr-soft { margin: 6px 0; }
 
-  /* The prose under each card head is a tooltip on the head at this width. */
+  /* Card prose becomes a tooltip on the head, flagged with a small marker. */
   .card-hint { display: none; }
   .card > .card-head[title] .grow::after {
-    content: " ⓘ"; font-size: 11px; font-weight: 400; opacity: .55;
+    content: " \24d8"; font-size: 11px; font-weight: 400; opacity: .55;
   }
 
-  /* Physical + Amenities side by side — 9 tri-rows each, stacked they cost
-     twice the height for no added clarity. */
-  .card-pair { display: flex; gap: 8px; align-items: flex-start; }
-  .card-pair > .card { margin-bottom: 8px; }
-
-  /* -------------------------------------------------------------- fields */
-  /* Card bodies that are nothing but fields become a 12-column grid, so the
-     22 comp fields flow six-across instead of stacking 22 rows deep.
-     `.field-row` groups dissolve into the same grid via display:contents —
-     their side-by-side intent is what the grid already does. */
+  /* ============================ 1. PROPERTY BASICS ======================= */
+  /* A 12-column grid so fields sit next to each other, sized by what the value
+     actually needs rather than by source order: a year is four characters and
+     has no business occupying the same width as a street address. */
   .comp-card > .card-body,
-  [data-cardkey^="fees:"] > .card-body,
-  .urow-body {
+  [data-cardkey^="more:"] > .card-body {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
-    grid-auto-flow: row dense;   /* backfill the gap a wide field leaves behind */
-    gap: 4px 7px;
+    grid-auto-flow: row dense;
+    gap: 6px 8px;
     align-items: end;
   }
   .comp-card > .card-body > .field-row,
-  [data-cardkey^="fees:"] > .card-body > .field-row,
-  .urow-body > .field-row { display: contents; }
+  [data-cardkey^="more:"] > .card-body > .field-row { display: contents; }
 
   .comp-card .field,
-  [data-cardkey^="fees:"] .field,
-  .urow-body .field { margin-bottom: 0; grid-column: span 2; }
+  [data-cardkey^="more:"] .field { margin-bottom: 0; grid-column: span 2; }
 
-  /* Width by what the value actually needs, not by source order. */
-  .field[data-fld="state"], .field[data-fld="zip"],
-  .field[data-fld="beds"],  .field[data-fld="baths"] { grid-column: span 1; }
-  .field[data-fld="name"],  .field[data-fld="address"],
-  .field[data-fld="website"], .field[data-fld="msa"] { grid-column: span 3; }
-  .field[data-fld="notes"] { grid-column: span 6; }
-  .field[data-fld="category"] { grid-column: span 4; }
+  .field[data-fld="year_built"], .field[data-fld="total_units"],
+  .field[data-fld="distance_miles"], .field[data-fld="vacancy_pct"],
+  .field[data-fld="concession_amount"], .field[data-fld="wd_type"] { grid-column: span 1; }
+  .field[data-fld="name"], .field[data-fld="address"],
+  .field[data-fld="category"], .field[data-fld="source"],
+  .field[data-fld="website"] { grid-column: span 3; }
+  .field[data-fld="notes"] { grid-column: span 7; }
 
-  /* Anything that is not a field still gets its own full-width line. */
-  .comp-card > .card-body > .btn-row,
-  [data-cardkey^="fees:"] > .card-body > .btn-row,
-  [data-cardkey^="fees:"] > .card-body > .sub-label,
-  [data-cardkey^="fees:"] > .card-body > .hr-soft,
-  .urow-body > .btn-row,
-  .urow-body > .note { grid-column: 1 / -1; }
-  [data-cardkey^="fees:"] > .card-body > .sub-label { margin: 4px 0 0; }
+  [data-cardkey^="more:"] > .card-body > .sub-label { grid-column: 1 / -1; margin: 4px 0 0; }
 
   .field label {
-    font-size: 10px; font-weight: 600; line-height: 1.15; letter-spacing: .01em;
-    margin-bottom: 1px; white-space: nowrap; overflow: hidden;
+    font-size: 11.5px; font-weight: 600; line-height: 1.2;
+    margin-bottom: 2px; white-space: nowrap; overflow: hidden;
     text-overflow: ellipsis; max-width: 100%;
   }
   .comp-card input, .comp-card select, .comp-card textarea,
-  [data-cardkey^="fees:"] input, [data-cardkey^="fees:"] select,
-  .urow-body input, .urow-body select, .urow-body textarea {
-    font-size: 12.5px; padding: 2px 5px; min-height: 25px; border-radius: 5px;
+  [data-cardkey^="more:"] input, [data-cardkey^="more:"] select,
+  .urow-body input, .urow-body select, .fee-cell input {
+    font-size: 14px; padding: 4px 6px; min-height: 30px; border-radius: 6px;
   }
-  .comp-card textarea, .urow-body textarea { min-height: 25px; line-height: 1.25; }
+  /* The unit-mix table trades a little control height for row count — a comp
+     can carry nine plans per section and every one of them is a line here. */
+  .urow-body input, .urow-body select { min-height: 28px; padding: 3px 6px; }
+  .comp-card textarea { min-height: 30px; line-height: 1.3; }
 
-  /* Category picker: three buttons on one short line. */
   .comp-card .cat-picker { gap: 4px; }
-  .comp-card .cat-picker button { font-size: 11px; padding: 4px 6px; min-height: 27px; }
+  .comp-card .cat-picker button { font-size: 12px; padding: 5px 4px; min-height: 30px; }
 
-  /* ------------------------------------------------------------ tri-state */
-  /* 9 attributes as 3 columns of 3 instead of 9 stacked rows. */
-  .tri-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr) 78px);
-    gap: 4px 10px;
+  /* ================================ 2. UNIT MIX ========================== */
+  /* One line per floor plan. The accordion bar is the phone affordance; here
+     every row is open and the labels print once, as column headings. */
+  .umix-summary { font-size: 13px; margin-bottom: 5px; }
+  .urow-bar { display: none; }
+  .umix-table { border-top: 1px solid var(--line); }
+  .urow, .urow.collapsed {
+    border: 0; border-bottom: 1px solid var(--line);
+    border-radius: 0; margin: 0; background: transparent;
   }
-  .tri-grid > .lbl { font-size: 11.5px; }
+  .urow.no-bucket { background: var(--err-bg); }
+  .urow.collapsed .urow-body, .urow .urow-body { display: grid; padding: 3px 6px; }
+  .umix-head { display: grid; padding: 3px 6px; }
+  .umix-head, .urow-body { gap: 3px 6px; align-items: center; }
+  .umix-head > div {
+    font-size: 11px; font-weight: 700; color: var(--muted);
+    text-transform: uppercase; letter-spacing: .02em;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* Labels live in the header row, so per-row labels would be printed 4-10 times. */
+  .urow-body .field { margin-bottom: 0; grid-column: auto; }
+  .urow-body .field label { display: none; }
+  .urow-body > .note { grid-column: 1 / -1; }
+
+  .umix-comp .umix-head, .umix-comp .urow-body {
+    grid-template-columns:
+      minmax(80px, 1.3fr)  /* Floor Plan */
+      52px 52px            /* Beds, Baths */
+      66px 62px            /* SF, # Units */
+      82px 60px            /* Ask $/Mo, Occ % */
+      minmax(90px, 1fr)    /* Concession */
+      minmax(90px, 1.2fr)  /* Notes */
+      62px;                /* actions */
+  }
+  .umix-subject .umix-head, .umix-subject .urow-body {
+    grid-template-columns:
+      minmax(80px, 1.6fr) 52px 52px 66px 62px 92px minmax(96px, 1fr) 62px;
+  }
+
+  /* ============================== 3. ATTRIBUTES ========================== */
+  /* Three tables side by side; inside each, one line item per row with its
+     indicator on the right. Vertical is the point — a reader scans one column
+     of labels, not a grid they have to re-read left to right. */
+  .card-trio { display: flex; gap: 8px; align-items: flex-start; }
+  .card-trio > .card { margin-bottom: 7px; }
+  .tri-grid { grid-template-columns: minmax(0, 1fr) 92px; gap: 2px 8px; }
+  .tri-grid > .lbl {
+    font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .tri { gap: 2px; }
-  .tri button { font-size: 11px; padding: 3px 0; }
+  .tri button { font-size: 12px; padding: 3px 0; }
+  .fee-grid { grid-template-columns: minmax(0, 1fr) 92px; }
+  .fee-cell input { min-height: 26px; padding: 2px 6px; }
 
-  /* ------------------------------------------------------------ unit mix */
-  .umix-summary { font-size: 11.5px; margin-bottom: 4px; }
-  .urow { margin-bottom: 4px; }
-  .urow-bar { padding: 3px 8px; font-size: 12px; }
+  /* ------------------------------------------------------------- buttons */
   .btn-row { padding-bottom: 0; }
-  .btn-row .btn.small,
-  .btn-row button.btn { font-size: 12px; padding: 3px 8px; min-height: 24px; }
-  .card-body > .btn-row[style] { margin-top: 5px !important; }
-}
-
-/* Wider still: attributes go three-across and the grid gains breathing room. */
-@media (min-width: 1200px) {
-  .tri-grid { grid-template-columns: repeat(3, minmax(0, 1fr) 78px); }
+  .btn-row .btn.small, .btn-row button.btn {
+    font-size: 13px; padding: 4px 9px; min-height: 27px;
+  }
+  .icon-btn { font-size: 14px; padding: 4px 7px; }
 }
