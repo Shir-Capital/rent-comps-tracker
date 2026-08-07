@@ -200,6 +200,10 @@ function compUnitMixForJson(comp) {
         /* Per-floorplan occupancy, unit-row offset 3. Written for real from
            populator v33 on (v24-v32 wrote a flat 0.95 and ignored this). */
         occupancy_pct: pctToFraction(r.occ_pct),
+        /* Finish level of the quoted units. No COMPS cell — the unit rows have
+           no finish column — but it matters to anyone reading the comparison,
+           so it rides the payload alongside the subject's equivalent. */
+        status: r.status || '',
         concession: r.concession || '',
         notes: r.notes || '',
       });
@@ -444,7 +448,7 @@ async function buildCompsWorkbook() {
   {
     const ws = wb.addWorksheet('Unit Mix');
     const heads = ['Comp #', 'Comp Name', 'Type', 'COMPS Section', 'COMPS Row', 'Floor Plan',
-      'Beds', 'Baths', 'SF', '# Units', 'Occ %', 'Ask $/Mo', '$/SF', 'Concession', 'Notes'];
+      'Beds', 'Baths', 'SF', '# Units', 'Occ %', 'Ask $/Mo', '$/SF', 'Status', 'Concession', 'Notes'];
     titleRow(ws, `COMP UNIT MIX — ${s.name || STATE.name}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
@@ -464,7 +468,7 @@ async function buildCompsWorkbook() {
             r.plan || '', numOrNull(r.beds), numOrNull(r.baths), sf,
             numOrNull(r.count), numOrNull(r.occ_pct), rent,
             rent && sf ? Number((rent / sf).toFixed(2)) : null,
-            r.concession || '', r.notes || '',
+            r.status || '', r.concession || '', r.notes || '',
           ]);
           row.eachCell(cell => { cell.font = font; });
           if (overflow) {
@@ -478,7 +482,7 @@ async function buildCompsWorkbook() {
         const row = ws.addRow([ci + 1, c.name || '', c.category || '', '(no section)', 'NOT EXPORTED',
           r.plan || '', numOrNull(r.beds), numOrNull(r.baths), numOrNull(r.sqft),
           numOrNull(r.count), numOrNull(r.occ_pct), numOrNull(r.ask_rent), null,
-          r.concession || '', r.notes || '']);
+          r.status || '', r.concession || '', r.notes || '']);
         row.eachCell(cell => {
           cell.font = font;
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
