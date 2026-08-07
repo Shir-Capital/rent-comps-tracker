@@ -19,12 +19,28 @@
 
 const HELLODATA_BASE = 'https://api.hellodata.ai';
 
-/* What populate_comps.py actually writes into each comp unit row's Occ % cell.
-   It is a hardcoded constant in v27/v29/v30 — none of them read the payload's
-   occupancy_pct — so per-plan occupancy captured here does NOT reach the
-   proforma. Kept as a named constant so the Cell Map and the pre-flight warning
-   can never drift apart. */
-const POPULATOR_OCC_PCT = 0.95;
+/* Occ % / Vac % reach the workbook as 0-1 fractions; the tracker captures them
+   the way an analyst says them (95, 4.5). Convert once, here, so the payload and
+   the Cell Map can never disagree about scale. Anything outside 0-100 is
+   rejected rather than written — populate_comps v33+ does the same and leaves
+   the cell blank, which reads as "not collected" instead of a fabricated number. */
+function pctToFraction(v) {
+  const n = numOrNull(v);
+  if (n == null) return null;
+  if (n < 0 || n > 100) return null;
+  return n > 1 ? Number((n / 100).toFixed(4)) : n;
+}
+
+/* COMPS row 4 offset 4 holds a one-time dollar concession. When only "months
+   free" was recorded, mirror the populator's own fallback — months x the comp's
+   average asking rent — so the Cell Map shows the number that will land there. */
+function concessionFromMonths(comp) {
+  const months = numOrNull(comp.concession_months);
+  if (months == null || months <= 0) return null;
+  const avg = compStats(comp).avgRent;
+  if (!avg) return null;
+  return Math.round(months * avg);
+}
 
 // ============================================================================
 // Validation
@@ -104,15 +120,29 @@ function collectChecks() {
     out.push({ level: 'warn', msg: 'Subject unit mix is empty — the $/SF market-rent method and the Δ-vs-in-place column will be blank.' });
   }
 
-  /* Occ % is captured per plan but no populator version transfers it — they all
-     write a flat 0.95. Say so, rather than let it look like it carried over. */
-  const withOcc = comps.filter(c => (c.unitMix || []).some(r => num(r.occ_pct) > 0));
-  if (withOcc.length) {
+  /* Per-plan Occ % IS written from v33 on, but the template's Occ % subtotal is a
+     SUMPRODUCT that reads a blank as zero — so a section with occupancy on some
+     plans and not others subtotals low. Populate a section fully or not at all. */
+  comps.forEach(c => {
+    BUCKETS.forEach(b => {
+      const rows = (groupByBucket(c.unitMix)[b.key] || []).filter(rowHasData);
+      if (rows.length < 2) return;
+      const withOcc = rows.filter(r => num(r.occ_pct) > 0).length;
+      if (withOcc > 0 && withOcc < rows.length) {
+        out.push({
+          level: 'warn',
+          msg: `${c.name || '(unnamed)'} ${b.short}: Occ % on ${withOcc} of ${rows.length} plans. `
+            + `The section subtotal is a SUMPRODUCT and counts the blanks as 0% — fill them all or none.`,
+        });
+      }
+    });
+  });
+
+  const noVac = comps.filter(c => numOrNull(c.vacancy_pct) == null);
+  if (noVac.length) {
     out.push({
       level: 'warn',
-      msg: `Occupancy recorded on ${withOcc.length} comp(s) (${withOcc.map(c => c.name || '(unnamed)').join(', ')}) `
-        + `is kept in the tracker but NOT written to the proforma — populate_comps writes a flat `
-        + `${(POPULATOR_OCC_PCT * 100).toFixed(0)}% to every comp unit row. Adjust it in the workbook if it matters.`,
+      msg: `No property-level Vacancy % on ${noVac.length} comp(s) — COMPS row 4 "Vac:" stays blank on those.`,
     });
   }
 
@@ -167,7 +197,9 @@ function compUnitMixForJson(comp) {
         count: num(r.count) || 1,
         sf: numOrNull(r.sqft),
         rent: numOrNull(r.ask_rent),
-        occupancy_pct: numOrNull(r.occ_pct),
+        /* Per-floorplan occupancy, unit-row offset 3. Written for real from
+           populator v33 on (v24-v32 wrote a flat 0.95 and ignored this). */
+        occupancy_pct: pctToFraction(r.occ_pct),
         concession: r.concession || '',
         notes: r.notes || '',
       });
@@ -187,10 +219,11 @@ function buildPopulatorPayload() {
   return {
     skill_chain: 'rent-comps-tracker -> rent-comp-data-populator (populate_comps.py --skip-fetch)',
     generator: 'rent-comps-tracker',
-    /* Geometry stamp — v3 = 9-col comp stride from col Y. A v29-or-earlier
-       populator run against this payload's target template lands 2 cols off. */
-    template_version: TAB.templateVersion || 'SHIR_MF_Template_v3',
-    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v30.py',
+    /* Geometry stamp — v7 keeps the 9-col stride from Y but moved the attribute
+       band up to 79-87 and shrank every unit section to 9 rows. A v30-or-earlier
+       populator hardcodes the v3 rows and writes amenities into the photo band. */
+    template_version: TAB.templateVersion || 'SHIR_MF_Template_v7',
+    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v35.py',
     generated_at: nowISO(),
     generated_by: (CURRENT_USER && CURRENT_USER.email) || '',
     property_url: APP_BASE_URL + propertyHash(STATE).replace(/^#/, '#'),
@@ -208,6 +241,7 @@ function buildPopulatorPayload() {
       stories: numOrNull(s.stories),
       occupancy_pct: numOrNull(s.occupancy_pct),
       wd_type: s.wd_type || '',
+      util_structure: s.util_structure || '',
       reno_level: s.reno_level || '',
       hellodata_id: s.hellodata_id || '',
       unit_mix: (STATE.subjectUnitMix || []).filter(rowHasData).map(r => ({
@@ -253,10 +287,21 @@ function buildPopulatorPayload() {
       category: c.category || '',
       year_built: numOrNull(c.year_built),
       total_units: numOrNull(c.total_units),
+      /* Tracker-only from v7 on — row-4 offset 2 became Distance, so stories has
+         no COMPS cell. Kept in the payload because the workbook reports on it. */
       stories: numOrNull(c.stories),
       distance_miles: numOrNull(c.distance_miles),
-      occupancy_pct: numOrNull(c.occupancy_pct),
+      /* Property-level vacancy, row 4 offset 3. Sent as a 0-1 fraction under the
+         key normalize_vacancy() reads first. NOT the per-floorplan Occ %. */
+      vacancy_pct: pctToFraction(c.vacancy_pct),
+      /* Row 4 offset 4. The populator prefers the dollar amount and falls back to
+         months x the comp's average asking rent. */
+      concession_amount: numOrNull(c.concession_amount),
+      concession_months: numOrNull(c.concession_months),
+      /* Row 4 offsets 6-7 are manual analyst dropdowns the populator never
+         writes; carried so the workbook and a human reviewer can see them. */
       wd_type: c.wd_type || '',
+      util_structure: c.util_structure || '',
       reno_level: c.reno_level || '',
       source: c.source || '',
       hellodata_id: c.hellodata_id || '',
@@ -360,8 +405,9 @@ async function buildCompsWorkbook() {
   {
     const ws = wb.addWorksheet('Comp Summary');
     const heads = ['#', 'Comp Name', 'Type', 'Street Address', 'City', 'ST', 'Year', 'Units',
-      'Stories', 'Dist (mi)', 'Occ %', 'W/D', 'Reno', 'Source', 'Plans', 'Avg SF',
-      'Avg Ask $', '$/SF', 'Min $', 'Max $', 'Sections', 'Visited', 'By', 'Phone', 'Notes'];
+      'Stories', 'Dist (mi)', 'Vac %', 'Conc $', 'Conc mo', 'W/D', 'Utilities', 'Reno',
+      'Source', 'Plans', 'Avg SF', 'Avg Ask $', '$/SF', 'Min $', 'Max $', 'Sections',
+      'Visited', 'By', 'Phone', 'Notes'];
     titleRow(ws, `RENT COMPS — ${s.name || STATE.name} — ${todayISO()}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
@@ -373,8 +419,9 @@ async function buildCompsWorkbook() {
         i + 1, c.name || '', c.category ? categoryMeta(c.category).label : '',
         streetOnly(c.address), c.city || '', c.state || '',
         numOrNull(c.year_built), numOrNull(c.total_units), numOrNull(c.stories),
-        numOrNull(c.distance_miles), numOrNull(c.occupancy_pct),
-        c.wd_type || '', c.reno_level || '', c.source || '',
+        numOrNull(c.distance_miles), numOrNull(c.vacancy_pct),
+        numOrNull(c.concession_amount), numOrNull(c.concession_months),
+        c.wd_type || '', c.util_structure || '', c.reno_level || '', c.source || '',
         st.planCount, st.avgSf ? Math.round(st.avgSf) : null,
         st.avgRent ? Math.round(st.avgRent) : null,
         st.psf ? Number(st.psf.toFixed(2)) : null,
@@ -510,7 +557,7 @@ async function buildCompsWorkbook() {
   {
     const ws = wb.addWorksheet('COMPS Cell Map');
     const heads = ['Cell', 'Row', 'Col', 'Belongs To', 'Field', 'Value'];
-    titleRow(ws, `COMPS TAB CELL MAP — what populate_comps.py (v30) writes — ${TAB.templateVersion || 'SHIR_MF_Template_v3'}`, heads.length);
+    titleRow(ws, `COMPS TAB CELL MAP — what ${TAB.populatorScript || 'populate_comps'} writes — ${TAB.templateVersion || 'SHIR_MF_Template_v7'}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
@@ -542,14 +589,26 @@ async function buildCompsWorkbook() {
 
       put(TAB.rowDetails, base + off.yearBuilt, who, 'Year built', numOrNull(c.year_built));
       put(TAB.rowDetails, base + off.totalUnits, who, 'Total units', numOrNull(c.total_units));
-      put(TAB.rowDetails, base + off.stories, who, 'Stories', numOrNull(c.stories));
+      /* v7 row-4 order: distance is offset 2 and property-level vacancy offset 3.
+         The v3 map had stories/distance in those two cells, which is how v30 came
+         to render a 1.3-mile comp as "Vac: 130.0%". Stories has no cell at all
+         now — it stays on the Comp Summary sheet only. */
       put(TAB.rowDetails, base + off.distanceMiles, who, 'Distance (mi)', numOrNull(c.distance_miles));
-      /* Row-4 W/D type + Reno level are MANUAL analyst cells in Template_v3 —
-         the v30 populator never writes them, so they stay off this map to keep
-         the populated-workbook reconciliation exactly 1:1. */
+      put(TAB.rowDetails, base + off.vacancyPct, who, 'Vacancy % (property)', pctToFraction(c.vacancy_pct));
+      put(TAB.rowDetails, base + off.concessionDollars, who, 'Concession $ (one-time)',
+        numOrNull(c.concession_amount) != null
+          ? numOrNull(c.concession_amount)
+          : concessionFromMonths(c));
+      /* Offset 5 (Concession %) is a template formula; offsets 6-7 (W/D type,
+         utility structure) are manual analyst dropdowns the populator never
+         writes. All three stay off this map so reconciliation is exactly 1:1. */
 
       put(TAB.rowCompType, base + off.compTypeValue, who, 'Comp Type',
         c.category ? categoryMeta(c.category).label : '');
+      /* v35 moved Comp Source to offset 5 — the template styles offsets 2 and 5
+         of this row as inputs and leaves 4 plain. A v35 run also CLEARS the
+         legacy offset-4 cell, so a re-run over a v31-v34 workbook drops the
+         stale copy rather than showing the source twice. */
       put(TAB.rowCompType, base + off.compSourceValue, who, 'Comp Source', c.source || '');
 
       BUCKETS.forEach(b => {
@@ -561,12 +620,11 @@ async function buildCompsWorkbook() {
           put(row, base + off.unitRowNum, who, tag + ' — row #', j + 1);
           put(row, base + off.unitCount, who, tag + ' — # units', numOrNull(r.count));
           put(row, base + off.unitSf, who, tag + ' — SF', numOrNull(r.sqft));
-          /* Occ %: every populator version (v27/v29/v30) writes the CONSTANT
-             0.95 here and has never read occupancy_pct from the payload. Map
-             what actually gets written, or reconciliation reports a mismatch on
-             every unit row of every comp that has occupancy captured. */
-          put(row, base + off.unitOccPct, who, tag + ' — Occ % (populator constant)',
-            POPULATOR_OCC_PCT);
+          /* Occ %: v24-v32 wrote a flat 0.95 here regardless of what was
+             captured. v33+ writes the real per-floorplan number and leaves the
+             cell blank when there isn't one, so an uncaptured plan belongs
+             nowhere on this map. */
+          put(row, base + off.unitOccPct, who, tag + ' — Occ %', pctToFraction(r.occ_pct));
           put(row, base + off.unitAskRent, who, tag + ' — Ask $/Mo', numOrNull(r.ask_rent));
         });
       });
@@ -574,8 +632,11 @@ async function buildCompsWorkbook() {
       PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, who, pa.label, c.physical[pa.key] || ''));
       AMENITIES.forEach(am => put(am.row, base + off.amenityValue, who, am.label, c.amenities[am.key] || ''));
 
-      /* FEES $/Mo column (Template_v3) — required-of-all-tenants monthly fees.
-         These feed the unit rows' Eff. $/Mo formulas, so blanks stay blank. */
+      /* FEES $/Mo column, rows 79-86 — required-of-all-tenants monthly fees.
+         These feed the unit rows' Eff. $/Mo formulas, so blanks stay blank. Row
+         87 is inside the same SUM but has no label and is deliberately never
+         mapped: a number there inflates every unit row's effective rent with
+         nothing on screen to explain it. */
       (SCHEMA.fees || []).filter(f => f.compsRow).forEach(f =>
         put(f.compsRow, base + off.feeValue, who, 'Fee — ' + f.label, numOrNull(c.fees[f.key])));
     });
@@ -687,7 +748,13 @@ function renderPhase4() {
         ${order || '<div class="muted small">No comps to place.</div>'}
         <hr class="hr-soft"/>
         <div class="kv"><span class="k">Sections priced (col G)</span><span class="v">${rents.filter(r => r.effective > 0).length}/${BUCKETS.length}</span></div>
-        <div class="kv"><span class="k">Target</span><span class="v">COMPS rows ${esc(TAB.rowHeader)}–${esc(TAB.attrRowLast)}</span></div>
+        <div class="kv"><span class="k">Target</span><span class="v">${esc(TAB.templateVersion)} · rows ${esc(TAB.rowHeader)}–${esc(TAB.attrRowLast)}</span></div>
+        ${TAB.templateSlots > MAX_COMPS ? `<div class="tiny muted" style="margin-top:6px">
+          The COMPS tab has ${esc(TAB.templateSlots)} comp slots, but the last
+          ${esc(TAB.templateSlots - MAX_COMPS)} (cols ${esc((TAB.templateSlotBaseCols || []).slice(MAX_COMPS).map(colLetter).join(', '))})
+          are left pristine on purpose — the populator reads their untouched line-# serials to
+          repair any it clobbers elsewhere. ${esc(MAX_COMPS)} is the real ceiling.
+        </div>` : ''}
       </div>
     </div>
 
@@ -716,12 +783,16 @@ function renderPhase4() {
       <div class="card-head"><span class="grow">Then, on a machine with the proforma</span></div>
       <div class="card-body">
         <div class="muted small">Run the proven populator against the deal's proforma:</div>
-        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\rent-comp-data-populator-populate_comps-v30.py" ^
+        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v35.py')}" ^
   "&lt;proforma_in.xlsx&gt;" "&lt;proforma_out.xlsx&gt;" "${esc(exportFileBase())}.json" --skip-fetch</pre>
         <div class="tiny muted" style="margin-top:6px">
           Then reconcile the populated COMPS tab against the <b>COMPS Cell Map</b> sheet.<br/>
-          ⚠ v30 requires a <b>SHIR_MF_Template_v3+</b> proforma (COMPS comps 9 columns wide from col Y).
-          For a v2 / v36-lineage workbook use populate_comps-<b>v29</b> — mixing versions lands every comp 2 columns off.
+          ⚠ This payload targets <b>${esc(TAB.templateVersion || 'SHIR_MF_Template_v7')}</b> geometry:
+          attribute + fee band at rows ${esc(TAB.attrRowFirst)}–${esc(TAB.attrRowLast)}, nine rows per unit section,
+          row 4 = year · units · distance · vacancy · concession.
+          v35 resolves those rows by label so it also handles v4/v5/v6, but
+          <b>v30 and earlier hardcode the v3 rows</b> and will write amenities into the photo band.
+          For a v2 / v36-lineage workbook (7-col stride from W) use populate_comps-<b>v29</b>.
         </div>
       </div>
     </div>`;
