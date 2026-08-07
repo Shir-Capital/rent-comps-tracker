@@ -164,7 +164,9 @@ const UMIX_COMMON = [
 const UMIX_COMP_EXTRA = [
   { key: 'ask_rent',   label: 'Ask $/Mo', type: 'number', row: 'ro' },
   { key: 'occ_pct',    label: 'Occ %',    type: 'number', row: 'ro' },
-  { key: 'concession', label: 'Concession (e.g. 1 mo free)', type: 'text' },
+  /* Short label because it is now a column heading, printed once above the
+     table rather than beside each input. The example lives in the tooltip. */
+  { key: 'concession', label: 'Concession', type: 'text', note: 'Per-plan concession as advertised, e.g. "1 mo free". Free text — the property-level Concession $ on Property Basics is what reaches the COMPS tab.' },
   { key: 'notes',      label: 'Notes',    type: 'text' },
 ];
 const UMIX_SUBJECT_EXTRA = [
@@ -186,6 +188,15 @@ function unitRowSummary(r, kind) {
   return bits.join(' · ');
 }
 
+/**
+ * One plan per line.
+ *
+ * The accordion stays in the markup because a nine-column row cannot fit a
+ * 375px phone: below 900px the bar is the row and the fields drop open beneath
+ * it. At desktop widths CSS hides the bar, forces every body open, and lays the
+ * fields out as one table line under a single shared header — so the labels are
+ * printed once at the top instead of once per plan.
+ */
 function unitRowHtml(r, idx, kind, listPath) {
   const bk = bucketFor(r.beds, r.baths);
   const b = bk ? bucketByKey(bk) : null;
@@ -201,13 +212,21 @@ function unitRowHtml(r, idx, kind, listPath) {
     </div>
     <div class="urow-body">
       ${fieldsHtml(fields, r, 'unit:' + listPath + ':' + r.id)}
-      <div class="btn-row">
-        <button class="btn small danger" data-udel="${esc(r.id)}">Delete plan</button>
-        <button class="btn small" data-udup="${esc(r.id)}">Duplicate</button>
+      <div class="urow-acts">
+        <button class="icon-btn" data-udup="${esc(r.id)}" title="Duplicate this plan" aria-label="Duplicate plan">⧉</button>
+        <button class="icon-btn danger" data-udel="${esc(r.id)}" title="Delete this plan" aria-label="Delete plan">✕</button>
       </div>
       ${bk ? '' : '<div class="note" style="color:#b91c1c">Enter Beds (and Baths) so this plan lands in a COMPS section — unassigned plans are left out of the export.</div>'}
     </div>
   </div>`;
+}
+
+/** Column headings for the desktop table form — printed once, not per row. */
+function unitMixHeadHtml(kind) {
+  const fields = UMIX_COMMON.concat(kind === 'subject' ? UMIX_SUBJECT_EXTRA : UMIX_COMP_EXTRA);
+  return `<div class="umix-head">`
+    + fields.map(f => `<div>${esc(f.label)}</div>`).join('')
+    + `<div></div></div>`;
 }
 
 function unitMixBlockHtml(list, kind, listPath) {
@@ -223,7 +242,8 @@ function unitMixBlockHtml(list, kind, listPath) {
       ${chips ? '<div class="tiny muted">' + esc(chips) + '</div>' : ''}
       ${unassigned ? '<div class="tiny" style="color:#b91c1c">' + unassigned + ' plan(s) not assigned to a COMPS section</div>' : ''}
     </div>
-    <div data-umix-rows="${esc(listPath)}">
+    <div class="umix-table umix-${esc(kind)}" data-umix-rows="${esc(listPath)}">
+      ${list.length ? unitMixHeadHtml(kind) : ''}
       ${list.map((r, i) => unitRowHtml(r, i, kind, listPath)).join('') || '<div class="muted small">No floor plans yet.</div>'}
     </div>
     <div class="btn-row" style="margin-top:7px">
@@ -375,6 +395,21 @@ function triHtml(items, obj, path) {
         <button type="button" data-triv="N" class="${v === 'N' ? 'on-n' : ''}">N</button>
         <button type="button" data-triv=""  class="${v === '' ? 'on-b' : ''}">—</button>
       </div>`;
+  }).join('') + `</div>`;
+}
+
+/**
+ * The fees table, shaped like the tri-state ones so the three cards in the
+ * attributes row read as one thing: label on the left, its indicator on the
+ * right, one line item per row. Here the indicator is the dollar input.
+ */
+function feeTableHtml(items, obj, path) {
+  return `<div class="tri-grid fee-grid">` + items.map(f => {
+    const v = obj[f.key] == null ? '' : obj[f.key];
+    const hint = f.note ? ` title="${esc(f.note)}"` : '';
+    return `<div class="lbl"${hint}>${esc(f.label)}</div>
+      <div class="fee-cell"><input type="number" step="any" inputmode="decimal"
+        data-fpath="${esc(path)}" data-fkey="${esc(f.key)}" value="${esc(v)}" placeholder="—" /></div>`;
   }).join('') + `</div>`;
 }
 
@@ -738,10 +773,7 @@ function renderCompEditor(compId) {
       <div class="card-head"><span class="grow" id="comp-editor-title">${esc(c.name || 'Untitled comp')}</span></div>
       <div class="card-body">
         ${fieldsHtml(SCHEMA.compFields || [], c, path)}
-        <div class="field-row">
-          ${fieldHtml({ key: 'visited_at', label: 'Visited / Called On', type: 'date', row: 'v' }, c, path)}
-          ${fieldHtml({ key: 'visited_by', label: 'By', type: 'text', row: 'v' }, c, path)}
-        </div>
+        ${fieldHtml({ key: 'visited_at', label: 'Visited', type: 'date' }, c, path)}
       </div>
     </div>
 
@@ -760,7 +792,7 @@ function renderCompEditor(compId) {
       </div>
     </div>
 
-    <div class="card-pair">
+    <div class="card-trio">
       <div class="card">
         <div class="card-head" title="Leave “—” when you don't know. A blank cell is an honest gap; “N” claims the comp positively lacks it.">
           <span class="grow">Physical Attributes</span>
@@ -776,18 +808,28 @@ function renderCompEditor(compId) {
         <div class="card-head"><span class="grow">Amenities</span></div>
         <div class="card-body">${triHtml(AMENITIES, c.amenities, path + '.amenities')}</div>
       </div>
+
+      <div class="card">
+        <div class="card-head" title="Charged to ALL tenants. Written to the COMPS FEES $/Mo column and fed into the template's Eff. $/Mo formulas. Leave blank when unknown — never guess.">
+          <span class="grow">Fees</span><span class="head-stat">$/Mo</span>
+        </div>
+        <div class="card-body">
+          <div class="card-hint">Required of ALL tenants — these feed the template's
+            Eff. $/Mo formulas. Leave blank when unknown; never guess.</div>
+          ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsRow), c.fees, path + '.fees')}
+        </div>
+      </div>
     </div>
 
-    <div class="card${COLLAPSED.has('fees:' + c.compId) ? '' : ' collapsed'}" data-cardkey="fees:${esc(c.compId)}">
-      <div class="card-head" data-cardtoggle="fees:${esc(c.compId)}" data-cardinvert="1"
-           title="Required monthly fees are charged to ALL tenants and go into the COMPS FEES $/Mo column, feeding the template's Eff. $/Mo formulas. Leave blank when unknown — never guess. The tracker-only fees below are one-time or optional and are not written to the COMPS tab.">
-        <span class="chev">${COLLAPSED.has('fees:' + c.compId) ? '▼' : '▶'}</span>
-        <span class="grow">Fees &amp; Other Income</span>
+    <div class="card${COLLAPSED.has('more:' + c.compId) ? '' : ' collapsed'}" data-cardkey="more:${esc(c.compId)}">
+      <div class="card-head" data-cardtoggle="more:${esc(c.compId)}" data-cardinvert="1"
+           title="Contact details, reno level, and the one-time or optional charges. None of these has a cell on the COMPS tab; they travel in the export JSON and the reconciliation workbook.">
+        <span class="chev">${COLLAPSED.has('more:' + c.compId) ? '▼' : '▶'}</span>
+        <span class="grow">More — contact, reno level, optional fees</span>
       </div>
       <div class="card-body">
-        <div class="sub-label" title="Charged to ALL tenants. Written to the COMPS FEES $/Mo column and fed into the template's Eff. $/Mo formulas. Leave blank when unknown — never guess.">Required monthly → COMPS FEES column</div>
-        ${fieldsHtml((SCHEMA.fees || []).filter(f => f.compsRow), c.fees, path + '.fees')}
-        <div class="sub-label" title="One-time or optional charges. Not written to the COMPS tab, but they travel in the export JSON.">Tracker-only (one-time / optional)</div>
+        ${fieldsHtml(SCHEMA.compExtraFields || [], c, path)}
+        <div class="sub-label" title="One-time or optional charges. Not written to the COMPS tab, but they travel in the export JSON.">Tracker-only fees (one-time / optional)</div>
         ${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsRow), c.fees, path + '.fees')}
       </div>
     </div>`;
