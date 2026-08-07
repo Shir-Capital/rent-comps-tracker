@@ -651,8 +651,12 @@ function gotoPhase(phase) {
 function renderPhase1() {
   const host = $('#phase-content');
   const s = STATE.subject;
+  /* The subject tab holds one property, not eight comps side by side. Its widest
+     element is a 9-column unit table (~650px), so stretching it to the 1320px
+     the comps tab needs just spreads a dozen fields across an acre of white. */
+  host.classList.add('narrow');
   host.innerHTML = `
-    <div class="card">
+    <div class="card subject-card">
       <div class="card-head"><span class="grow">Subject Property</span></div>
       <div class="card-body">${fieldsHtml(SCHEMA.subjectFields || [], s, 'subject')}</div>
     </div>
@@ -694,6 +698,7 @@ function renderPhase1() {
 function renderPhase2() {
   if (OPEN_COMP_ID) { renderCompEditor(OPEN_COMP_ID); return; }
   const host = $('#phase-content');
+  host.classList.remove('narrow');
   const comps = sortedComps();
   const full = STATE.comps.length >= MAX_COMPS;
 
@@ -775,6 +780,7 @@ function renderCompEditor(compId) {
   const c = getComp(compId);
   if (!c) { OPEN_COMP_ID = null; renderPhase2(); return; }
   const host = $('#phase-content');
+  host.classList.remove('narrow');
   const st = compStats(c);
   const path = 'comp:' + c.compId;
 
@@ -882,6 +888,7 @@ function renderCompEditor(compId) {
 
 function renderPhase3() {
   const host = $('#phase-content');
+  host.classList.remove('narrow');
   const rows = marketRentTable();
   const nDirect = directComps().length;
 
