@@ -211,6 +211,7 @@ function unitRowHtml(r, idx, kind, listPath) {
       <span class="bucket">${b ? esc(b.short) : '?'}</span>
     </div>
     <div class="urow-body">
+      <div class="urow-sec" title="COMPS section this plan lands in">${b ? esc(b.short) : '?'}</div>
       ${fieldsHtml(fields, r, 'unit:' + listPath + ':' + r.id)}
       <div class="urow-acts">
         <button class="icon-btn" data-udup="${esc(r.id)}" title="Duplicate this plan" aria-label="Duplicate plan">⧉</button>
@@ -225,6 +226,7 @@ function unitRowHtml(r, idx, kind, listPath) {
 function unitMixHeadHtml(kind) {
   const fields = UMIX_COMMON.concat(kind === 'subject' ? UMIX_SUBJECT_EXTRA : UMIX_COMP_EXTRA);
   return `<div class="umix-head">`
+    + `<div title="COMPS section, from Beds/Baths">Sec</div>`
     + fields.map(f => `<div>${esc(f.label)}</div>`).join('')
     + `<div></div></div>`;
 }
@@ -344,8 +346,11 @@ function refreshUnitRowChrome(inputEl) {
   const sum = $('.sum', wrap);
   if (sum) sum.textContent = unitRowSummary(row, kind);
   const bk = bucketFor(row.beds, row.baths);
-  const chip = $('.bucket', wrap);
-  if (chip) chip.textContent = bk ? bucketByKey(bk).short : '?';
+  const short = bk ? bucketByKey(bk).short : '?';
+  const chip = $('.bucket', wrap);          // phone: lives in the accordion bar
+  if (chip) chip.textContent = short;
+  const sec = $('.urow-sec', wrap);         // desktop: its own table column
+  if (sec) sec.textContent = short;
   wrap.classList.toggle('no-bucket', !bk);
   refreshUnitMixSummary(listPath);
   if (CURRENT_PHASE === 3) renderPhase3();
@@ -389,7 +394,9 @@ function rerenderUnitMix(listPath) {
 function triHtml(items, obj, path) {
   return `<div class="tri-grid">` + items.map(it => {
     const v = obj[it.key] || '';
-    return `<div class="lbl">${esc(it.label)}</div>
+    /* Three pairs across gives each label ~70px, so the longer ones ellipsis.
+       The title keeps the full text one hover away. */
+    return `<div class="lbl" title="${esc(it.label)}">${esc(it.label)}</div>
       <div class="tri" data-tri="${esc(path)}" data-trikey="${esc(it.key)}">
         <button type="button" data-triv="Y" class="${v === 'Y' ? 'on-y' : ''}">Y</button>
         <button type="button" data-triv="N" class="${v === 'N' ? 'on-n' : ''}">N</button>
@@ -406,8 +413,8 @@ function triHtml(items, obj, path) {
 function feeTableHtml(items, obj, path) {
   return `<div class="tri-grid fee-grid">` + items.map(f => {
     const v = obj[f.key] == null ? '' : obj[f.key];
-    const hint = f.note ? ` title="${esc(f.note)}"` : '';
-    return `<div class="lbl"${hint}>${esc(f.label)}</div>
+    const hint = f.note ? esc(f.note) : esc(f.label);
+    return `<div class="lbl" title="${hint}">${esc(f.label)}</div>
       <div class="fee-cell"><input type="number" step="any" inputmode="decimal"
         data-fpath="${esc(path)}" data-fkey="${esc(f.key)}" value="${esc(v)}" placeholder="—" /></div>`;
   }).join('') + `</div>`;
