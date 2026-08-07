@@ -218,6 +218,7 @@ main { padding: 10px 10px 96px; max-width: 900px; margin: 0 auto; }
 /* Column headings for the desktop unit-mix table; the phone uses the accordion
    bar instead, so this is hidden below 900px. */
 .umix-head { display: none; }
+.urow-sec { display: none; }
 .fee-cell input { text-align: right; }
 
 input[type="text"], input[type="number"], input[type="tel"], input[type="url"],
@@ -618,8 +619,14 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
     gap: 6px 8px;
     align-items: end;
   }
+  /* Every grid that lays fields out itself must dissolve .field-row, or the two
+     fields it groups share ONE track: the header ends up with more columns than
+     the row has cells, and the pair gets squeezed into a 52px column until the
+     inputs look empty. The unit table needs this most — half its columns are
+     row-tagged pairs (Beds+Baths, SF+# Units, Ask+Occ). */
   .comp-card > .card-body > .field-row,
-  [data-cardkey^="more:"] > .card-body > .field-row { display: contents; }
+  [data-cardkey^="more:"] > .card-body > .field-row,
+  .urow-body > .field-row { display: contents; }
 
   .comp-card .field,
   [data-cardkey^="more:"] .field { margin-bottom: 0; grid-column: span 2; }
@@ -655,7 +662,10 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   /* ================================ 2. UNIT MIX ========================== */
   /* One line per floor plan. The accordion bar is the phone affordance; here
      every row is open and the labels print once, as column headings. */
-  .umix-summary { font-size: 13px; margin-bottom: 5px; }
+  /* The card head already carries avg / $SF / range, and every row now shows its
+     own section, so the chips line under the summary is saying it a third time. */
+  .umix-summary { font-size: 12.5px; margin-bottom: 3px; }
+  .umix-summary .tiny.muted { display: none; }
   .urow-bar { display: none; }
   .umix-table { border-top: 1px solid var(--line); }
   .urow, .urow.collapsed {
@@ -663,7 +673,7 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
     border-radius: 0; margin: 0; background: transparent;
   }
   .urow.no-bucket { background: var(--err-bg); }
-  .urow.collapsed .urow-body, .urow .urow-body { display: grid; padding: 3px 6px; }
+  .urow.collapsed .urow-body, .urow .urow-body { display: grid; padding: 2px 6px; }
   .umix-head { display: grid; padding: 3px 6px; }
   .umix-head, .urow-body { gap: 3px 6px; align-items: center; }
   .umix-head > div {
@@ -676,8 +686,19 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   .urow-body .field label { display: none; }
   .urow-body > .note { grid-column: 1 / -1; }
 
+  /* Which COMPS section the plan lands in. Hiding the accordion bar on desktop
+     hid the bucket chip with it, and that chip is the whole point of Beds/Baths
+     — it is what decides where the row's rent lands in the proforma. */
+  .urow-sec {
+    display: block; font-size: 11px; font-weight: 700; text-align: center;
+    color: var(--navy); background: var(--shir-blue);
+    border-radius: 4px; padding: 3px 2px;
+  }
+  .urow.no-bucket .urow-sec { background: var(--err-bg); color: var(--err); }
+
   .umix-comp .umix-head, .umix-comp .urow-body {
     grid-template-columns:
+      44px                 /* Section */
       minmax(80px, 1.3fr)  /* Floor Plan */
       52px 52px            /* Beds, Baths */
       66px 62px            /* SF, # Units */
@@ -688,7 +709,7 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   }
   .umix-subject .umix-head, .umix-subject .urow-body {
     grid-template-columns:
-      minmax(80px, 1.6fr) 52px 52px 66px 62px 92px minmax(96px, 1fr) 62px;
+      44px minmax(80px, 1.6fr) 52px 52px 66px 62px 92px minmax(96px, 1fr) 62px;
   }
 
   /* ============================== 3. ATTRIBUTES ========================== */
@@ -706,10 +727,29 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   .fee-grid { grid-template-columns: minmax(0, 1fr) 92px; }
   .fee-cell input { min-height: 26px; padding: 2px 6px; }
 
+  /* Two label+indicator pairs across inside each of the three cards: nine items
+     become five rows instead of nine. Labels ellipsis rather than wrap, and
+     every one carries a title so the full text is still reachable. */
+  .card-trio .tri-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr) 58px);
+    gap: 2px 7px;
+  }
+  .card-trio .tri-grid > .lbl { font-size: 12px; }
+  .card-trio .tri button { font-size: 11px; padding: 2px 0; }
+  .card-trio .fee-cell input { min-height: 24px; padding: 1px 5px; }
+
   /* ------------------------------------------------------------- buttons */
   .btn-row { padding-bottom: 0; }
   .btn-row .btn.small, .btn-row button.btn {
     font-size: 13px; padding: 4px 9px; min-height: 27px;
   }
   .icon-btn { font-size: 14px; padding: 4px 7px; }
+  .card-body > .btn-row[style] { margin-top: 4px !important; }
+}
+
+/* Wide enough for three pairs across inside each of the three cards: nine
+   attributes collapse to three rows, which is what brings the whole comp back
+   under a 768px laptop fold. Below this the trio drops to two-across. */
+@media (min-width: 1200px) {
+  .card-trio .tri-grid { grid-template-columns: repeat(3, minmax(0, 1fr) 58px); }
 }
