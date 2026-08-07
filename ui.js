@@ -164,6 +164,12 @@ const UMIX_COMMON = [
 const UMIX_COMP_EXTRA = [
   { key: 'ask_rent',   label: 'Ask $/Mo', type: 'number', row: 'ro' },
   { key: 'occ_pct',    label: 'Occ %',    type: 'number', row: 'ro' },
+  /* Finish level of the plan being quoted. The subject unit mix has carried this
+     since v0.1; a comp needs it just as much, because an asking rent means a
+     different thing depending on whether the unit is renovated. Tracker-only —
+     the COMPS unit rows have no finish column — but it rides the export and the
+     Unit Mix sheet, so a reviewer can see which quotes are comparable. */
+  { key: 'status',     label: 'Status',   type: 'select', options_ref: 'unitStatus', note: 'Finish level of the units being quoted. Tracker-only: the COMPS tab has no per-plan finish cell, but it travels in the export JSON and the Unit Mix sheet so a renovated quote is not read as an original one.' },
   /* Short label because it is now a column heading, printed once above the
      table rather than beside each input. The example lives in the tooltip. */
   { key: 'concession', label: 'Concession', type: 'text', note: 'Per-plan concession as advertised, e.g. "1 mo free". Free text — the property-level Concession $ on Property Basics is what reaches the COMPS tab.' },
@@ -185,6 +191,9 @@ function unitRowSummary(r, kind) {
     bits.push(money(rent));
     if (num(r.sqft) > 0) bits.push('$' + (rent / num(r.sqft)).toFixed(2) + '/SF');
   }
+  /* Finish belongs in the collapsed summary: on a phone the bar IS the row, and
+     a renovated asking rent read as an original one is a real mis-comparison. */
+  if (r.status) bits.push(r.status);
   return bits.join(' · ');
 }
 
