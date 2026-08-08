@@ -607,6 +607,29 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
     content: " \24d8"; font-size: 11px; font-weight: 400; opacity: .55;
   }
 
+  /* ------------------------------------------------- home: one card, one line */
+  /* Name · folder/edited · badges all on one row. Stacked they made every deal
+     76px tall, so a dozen subjects took two screens to scan; this is 44px.
+     ⚠️ DESKTOP ONLY, and not from timidity — measured at 375px, four badges
+     leave the name 99px, which renders both `DAL TX - Villas Del Zocalo` and
+     `DAL TX - Villas del Tesoro` as `DAL TX - Villas D…`. Dropping badges to buy
+     room only reached 20 characters, still not enough to tell those two apart.
+     A phone gets the full name on its own line instead. */
+  .prop-card .grow {
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  /* The name shrinks last: it is what you are scanning for. */
+  .prop-card .pname { flex: 0 1 auto; min-width: 0; }
+  .prop-card .psub {
+    flex: 1 6 auto; min-width: 0; margin-top: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* Sized to their content and pinned right — the counts are the reason to look
+     at this list, so they are the one thing that never truncates or wraps. */
+  .prop-card .badges {
+    flex: 0 0 auto; flex-wrap: nowrap; margin-top: 0; margin-left: auto;
+  }
+
   /* ============================ 1. PROPERTY BASICS ======================= */
   /* A 12-column grid so fields sit next to each other, sized by what the value
      actually needs rather than by source order: a year is four characters and
