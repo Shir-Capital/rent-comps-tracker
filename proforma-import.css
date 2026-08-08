@@ -1,0 +1,41 @@
+/* ==========================================================================
+   Import from Proforma (tab 1)
+   Phone-first like everything else: full-width rows, 38px+ touch targets, and
+   the file name allowed to wrap rather than being truncated — on a phone the
+   name IS how you tell `HOAcq_v5` from `HOAcq_v6`.
+   ========================================================================== */
+.pf-files { display: flex; flex-direction: column; gap: 4px; }
+
+.pf-file {
+  display: flex; align-items: flex-start; gap: 8px;
+  min-height: 38px; padding: 7px 8px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: #fff; cursor: pointer;
+}
+.pf-file.sel { border-color: var(--navy); background: #f4f7fd; }
+.pf-file input { flex: 0 0 auto; margin-top: 3px; width: 17px; height: 17px; }
+.pf-file-main { display: flex; flex-direction: column; min-width: 0; }
+.pf-file-name { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.pf-file-meta { font-size: 12px; color: var(--muted); }
+
+.pf-more { margin-top: 8px; }
+.pf-more > summary { font-size: 13px; color: var(--muted); cursor: pointer; padding: 5px 0; }
+
+.pf-grps { display: flex; flex-direction: column; gap: 3px; }
+.pf-grp {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 38px; font-size: 14px; cursor: pointer;
+}
+.pf-grp.off { opacity: .45; cursor: default; }
+.pf-grp input { width: 17px; height: 17px; flex: 0 0 auto; }
+.pf-danger { color: var(--err); font-size: 12px; }
+
+.pf-sub .kv { font-size: 13px; }
+
+@media (min-width: 900px) {
+  /* The file list is the one place this card can get tall — two columns keeps a
+     20-file deal folder on one screen. Everything else stays single-column. */
+  .pf-files { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+  .pf-file { min-height: 0; padding: 5px 7px; }
+  .pf-grp { min-height: 0; padding: 2px 0; }
+}
