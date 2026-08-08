@@ -671,7 +671,7 @@ function pfBucket(beds, baths) {
 /** The whole mapping from a COMPS read to the field items this app holds. */
 function pfToImport(det) {
   const warn = [];
-  const FEE_ROWS = (SCHEMA.fees || []).filter(f => f.compsRow);
+  const FEE_ROWS = (SCHEMA.fees || []).filter(f => f.compsLabel);
 
   const dash = det.dash || {};
   const loc = pfSplitCityStateZip(dash.citystatezip);
@@ -817,13 +817,32 @@ function pfToImport(det) {
       comp.amenities[AMENITIES[i].key] = t;
       if (raw) notes.push(lbl + ': ' + raw);
     });
-    (c.fees || []).slice(0, FEE_ROWS.length).forEach(([lbl, val], i) => {
-      const f = FEE_ROWS[i];
-      if (pfN(val) !== null) comp.fees[f.key] = pfNumStr(val);
-      else if (pfS(val)) notes.push('Fee ' + lbl + ': ' + pfS(val));
-      if (pfS(lbl) && lbl.toLowerCase() !== f.label.toLowerCase()
-          && (pfN(val) !== null || pfS(val))) {
-        notes.push('Fee row ' + (i + 1) + ' is labelled "' + lbl + '" in the proforma (tracker key: ' + f.label + ')');
+    /* Fees are matched BY LABEL, per comp. The band's row order is not a
+       contract: v8 made these cells dropdowns and dropped five of the eight v7
+       defaults, and analysts free-type per comp — in this very file, comp 2 has
+       `V Trash` / `Adm Trash` on the rows where comp 1 has the v7 set. Reading
+       the label and then assigning by INDEX (which is what this did until
+       2026-08-08) files a valet-trash charge as insurance, and the fee column is
+       summed into every unit's Eff. $/Mo. */
+    (c.fees || []).forEach(([lbl, val]) => {
+      const label = pfS(lbl);
+      const hasVal = pfN(val) !== null || pfS(val);
+      if (!hasVal) return;
+      if (!label) {
+        // The v7 band's 9th row has no label but IS inside the Eff. $/Mo SUM.
+        notes.push('Fee with no label: ' + pfS(val) + ' — it is still summed into Eff. $/Mo');
+        return;
+      }
+      const f = FEE_ROWS.find(x => (x.compsLabel || '').toLowerCase() === label.toLowerCase());
+      if (f && pfN(val) !== null) comp.fees[f.key] = pfNumStr(val);
+      else if (f) notes.push('Fee ' + label + ': ' + pfS(val));
+      else {
+        // A real charge the tracker has no field for — keep it rather than drop it.
+        notes.push('Fee ' + label + ': ' + pfS(val) + ' (no tracker field for this label)');
+        if (pfN(val) !== null && !comp.fees.other) {
+          comp.fees.other = pfNumStr(val);
+          comp.fees.other_label = label;
+        }
       }
     });
 

@@ -643,13 +643,30 @@ async function buildCompsWorkbook() {
       PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, who, pa.label, c.physical[pa.key] || ''));
       AMENITIES.forEach(am => put(am.row, base + off.amenityValue, who, am.label, c.amenities[am.key] || ''));
 
-      /* FEES $/Mo column, rows 79-86 — required-of-all-tenants monthly fees.
-         These feed the unit rows' Eff. $/Mo formulas, so blanks stay blank. Row
-         87 is inside the same SUM but has no label and is deliberately never
-         mapped: a number there inflates every unit row's effective rent with
-         nothing on screen to explain it. */
-      (SCHEMA.fees || []).filter(f => f.compsRow).forEach(f =>
-        put(f.compsRow, base + off.feeValue, who, 'Fee — ' + f.label, numOrNull(c.fees[f.key])));
+      /* FEES $/Mo column — required-of-all-tenants monthly fees. These feed the
+         unit rows' Eff. $/Mo formulas, so blanks stay blank.
+
+         NO ROW IS ASSERTED HERE, and that is the point. Template v8 turned the
+         FEES label cells into dropdowns, kept only Amenity / Cable-Internet /
+         Cleaning pre-selected and dropped Insurance / Pest / Parking / Utilities
+         / W-D from the list — so the v7 row for a given fee is simply wrong on a
+         v8 workbook. Labels also vary BY COMP within one file: Lantern's comp 2
+         carries `V Trash` and `Adm Trash` where comp 1 has the v7 defaults.
+         Only the destination workbook knows which row holds which label, so the
+         map names the label and the populator resolves the row against the
+         comp's own label column. An unlabelled row is never a target — a number
+         there inflates every unit row's effective rent with nothing on screen to
+         explain it. */
+      (SCHEMA.fees || []).filter(f => f.compsLabel).forEach(f => {
+        const v = numOrNull(c.fees[f.key]);
+        if (v == null || v === '') return;
+        const r = ws.addRow([
+          colLetter(base + off.feeValue) + '·"' + f.compsLabel + '"',
+          'by label', colLetter(base + off.feeValue),
+          who, 'Fee — ' + f.compsLabel + ' (row resolved by label)', v,
+        ]);
+        r.eachCell(cell => { cell.font = font; });
+      });
     });
 
     ws.columns = [{ width: 10 }, { width: 7 }, { width: 7 }, { width: 30 }, { width: 30 }, { width: 16 }];

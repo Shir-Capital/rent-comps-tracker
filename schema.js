@@ -514,61 +514,77 @@ window.SCHEMA = {
       "note": "Tracker-only — v7 has no per-comp reno cell (offset 7 is the utility structure)."
     }
   ],
+  "_feeVocabularyNote": "The 12 options template v8 put in the FEES label dropdowns, identical in the MF and ExStay families. Validation constrains humans typing, NOT programmatic writes — openpyxl and COM can still put any string in those cells — so anything reading or writing the fee band must know this list separately. `Storm water admin` is the corrected spelling; the audit sheet was marked KEEP on the misspelling `Storm watet admin`, which survives on exactly one live cell (Lantern COMPS!BX84) and no longer validates.",
+  "feeVocabulary": [
+    "Amenity",
+    "Cable/Internet",
+    "Cleaning",
+    "V Trash",
+    "Trash",
+    "Adm Trash",
+    "Facility",
+    "Conservice",
+    "Package",
+    "Storm drain",
+    "Storm water admin",
+    "Water admin"
+  ],
+  "_feesNote": "A fee's COMPS identity is its LABEL, never its row. `compsLabel` is the text that must appear in a comp block's FEES label column (offset 6) for that fee's value to be written at offset 7. Template v7 pre-printed 8 labels at rows 79-86; v8 (2026-08-07) made those cells DROPDOWNS, kept only Amenity / Cable-Internet / Cleaning pre-selected, and dropped Insurance / Pest / Parking / Utilities / W-D from the list entirely. So the row a label sits on differs by template version AND by comp — analysts free-type, and one live deal (Lantern) has `V Trash` on comp 2 row 86 while comp 1 still has the v7 defaults on the same rows. Anything keyed to a row number mislabels silently, and the fee column is summed into every unit's Eff. $/Mo. Keys with no compsLabel are tracker-only: one-time or optional charges with no cell in the template.",
   "fees": [
     {
       "key": "amenity",
       "label": "Amenity",
       "type": "number",
-      "compsRow": 79,
+      "compsLabel": "Amenity",
       "row": "tfee1"
     },
     {
       "key": "insurance",
       "label": "Insurance",
       "type": "number",
-      "compsRow": 80,
+      "compsLabel": "Insurance",
       "row": "tfee1"
     },
     {
       "key": "pest",
       "label": "Pest",
       "type": "number",
-      "compsRow": 81,
+      "compsLabel": "Pest",
       "row": "tfee2"
     },
     {
       "key": "parking",
       "label": "Parking",
       "type": "number",
-      "compsRow": 82,
+      "compsLabel": "Parking",
       "row": "tfee2"
     },
     {
       "key": "cleaning",
       "label": "Cleaning",
       "type": "number",
-      "compsRow": 83,
+      "compsLabel": "Cleaning",
       "row": "tfee3"
     },
     {
       "key": "cable_internet",
       "label": "Cable/Internet",
       "type": "number",
-      "compsRow": 84,
+      "compsLabel": "Cable/Internet",
       "row": "tfee3"
     },
     {
       "key": "utilities",
       "label": "Utilities",
       "type": "number",
-      "compsRow": 85,
+      "compsLabel": "Utilities",
       "row": "tfee4"
     },
     {
       "key": "wd",
       "label": "W/D",
       "type": "number",
-      "compsRow": 86,
+      "compsLabel": "W/D",
       "row": "tfee4"
     },
     {
@@ -594,12 +610,14 @@ window.SCHEMA = {
     {
       "key": "trash",
       "label": "Trash / Mo",
-      "type": "number"
+      "type": "number",
+      "compsLabel": "Trash"
     },
     {
       "key": "valet_trash",
       "label": "Valet Trash / Mo",
-      "type": "number"
+      "type": "number",
+      "compsLabel": "V Trash"
     },
     {
       "key": "other",
