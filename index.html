@@ -73,12 +73,15 @@
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
-<!-- Load order matters: schema -> core -> drive -> ui -> export -> app(boot). -->
+<!-- Load order matters: schema -> core -> drive -> ui -> export -> import -> app(boot).
+     proforma-import.js uses core's helpers and drive's I/O, and is called from
+     ui.js's renderPhase1 at runtime, so it only has to be in before boot. -->
 <script src="schema.js"></script>
 <script src="core.js"></script>
 <script src="drive.js"></script>
 <script src="ui.js"></script>
 <script src="export.js"></script>
+<script src="proforma-import.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
