@@ -15,6 +15,8 @@
 <!-- The import module ships its own stylesheet, the same way its JS is its own
      file — the feature is self-contained and so is what it looks like. -->
 <link rel="stylesheet" href="proforma-import.css" />
+<!-- Tab 3 (the Screener) is likewise its own pair of files. -->
+<link rel="stylesheet" href="screener.css" />
 </head>
 <body>
 <header class="app-header">
@@ -85,6 +87,8 @@
 <script src="ui.js"></script>
 <script src="export.js"></script>
 <script src="proforma-import.js"></script>
+<!-- Must load after ui.js: it replaces window.renderPhase3 with the Screener. -->
+<script src="screener.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
