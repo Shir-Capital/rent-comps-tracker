@@ -746,3 +746,44 @@ function pfApply() {
   toast('Imported ' + applied.join(' · '));
   renderPhase1();
 }
+
+// ------------------------------------------------------------ self-install
+//
+// The card mounts itself at the top of tab 1 instead of being rendered from
+// `renderPhase1()`. That keeps this feature to ONE file plus its stylesheet:
+// ui.js does not have to know the importer exists, and deleting these two files
+// removes it completely. `renderPhase1` replaces `#phase-content.innerHTML`
+// wholesale on every render (and on every unit-mix edit that falls back to a
+// full re-render), so an observer is what survives that — a one-time
+// `prepend()` would vanish on the next keystroke.
+//
+// The guard is `#pf-card` already being present, so this can never double-mount,
+// and it only ever fires on tab 1 of an open property.
+//
+// ⚠️ If ui.js is ever edited for another reason, the tidier form is two lines in
+// `renderPhase1` — `${pfImportCardHtml()}` in the template and `pfWire()` after
+// it — and this observer can go.
+function pfMount() {
+  const host = document.getElementById('phase-content');
+  if (!host || host.classList.contains('hidden')) return;
+  if (typeof STATE === 'undefined' || !STATE) return;
+  if (typeof CURRENT_PHASE !== 'undefined' && CURRENT_PHASE !== 1) return;
+  if (host.querySelector('#pf-card')) return;
+  const html = pfImportCardHtml();
+  if (!html) return;
+  host.insertAdjacentHTML('afterbegin', html);
+  pfWire();
+}
+
+function pfInstall() {
+  const host = document.getElementById('phase-content');
+  if (!host) { setTimeout(pfInstall, 50); return; }
+  new MutationObserver(() => pfMount()).observe(host, { childList: true });
+  pfMount();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', pfInstall);
+} else {
+  pfInstall();
+}
