@@ -241,6 +241,7 @@ function newProperty(name) {
     subjectUnitMix: [],
     comps: [],
     marketRents: {},   // bucketKey -> { override: '' }
+    imports: {},       // group -> { fileName, fileId, importedAt, ... }
   };
   STORE.properties[id] = p;
   STORE.currentPropertyId = id;
@@ -267,6 +268,19 @@ function hydrateProperty(p) {
   if (!Array.isArray(p.subjectUnitMix)) p.subjectUnitMix = [];
   if (!Array.isArray(p.comps)) p.comps = [];
   p.marketRents = p.marketRents || {};
+  /* `vacant_count` arrived with the RR import. Blank — NOT 0 — is the right
+     default on every pre-existing row: 0 would assert "fully leased" about a
+     property nobody recorded occupancy for, and unitMixTotals() reads blank as
+     "unknown" and weights by the full count, exactly as it did before the field
+     existed. See occupiedUnitsOf(). */
+  p.subjectUnitMix.forEach(r => {
+    if (!r.id) r.id = uid();
+    if (r.vacant_count === undefined) r.vacant_count = '';
+  });
+  /* Per-import provenance: which workbook each half of this record came from.
+     Keyed by group because the subject and the comps can legitimately come from
+     different revisions, or different workbooks entirely. */
+  p.imports = p.imports || {};
   p.comps.forEach(c => hydrateComp(c));
   return p;
 }
@@ -325,8 +339,19 @@ function newComp() {
 function newUnitRow() {
   return { id: uid(), plan: '', beds: '', baths: '', sqft: '', count: '', occ_pct: '', ask_rent: '', status: '', concession: '', notes: '' };
 }
+/**
+ * `count` is TOTAL units for the plan+finish — occupied AND vacant. `vacant_count`
+ * is how many of them are down.
+ *
+ * The subject stores a COUNT where a comp row stores an `occ_pct` percentage, and
+ * the asymmetry is deliberate: the proforma import has the exact figure from both
+ * of RR's unit-mix blocks, and a stored, rounded percentage would feed rounding
+ * error straight into the occupied-weighted rent average in unitMixTotals().
+ * Comp occupancy arrives from HelloData as a percentage and the counts behind it
+ * are never visible, so each side stores what its source actually knows.
+ */
 function newSubjectUnitRow() {
-  return { id: uid(), plan: '', beds: '', baths: '', sqft: '', count: '', status: '', current_rent: '' };
+  return { id: uid(), plan: '', beds: '', baths: '', sqft: '', count: '', vacant_count: '', status: '', current_rent: '' };
 }
 
 function getComp(compId) {
@@ -390,18 +415,57 @@ function rowHasData(r) {
   return num(r.count) > 0 || num(r.sqft) > 0 || num(r.ask_rent) > 0 || num(r.current_rent) > 0;
 }
 
+/** True when this row records an occupancy figure at all. Blank = unknown. */
+function hasVacancyFigure(r) {
+  return !!r && r.vacant_count !== '' && r.vacant_count != null;
+}
+
+/**
+ * Leased units on a subject unit-mix row.
+ * A row with no vacancy figure returns its full count — "unknown" must behave
+ * exactly as it did before the field existed, not as "all vacant".
+ */
+function occupiedUnitsOf(r) {
+  const total = num(r && r.count);
+  if (total <= 0) return 0;
+  if (!hasVacancyFigure(r)) return total;
+  return Math.max(0, total - num(r.vacant_count));
+}
+
+/** Occupied share of a row, 0-100, or null when no vacancy was recorded. */
+function occPctOf(r) {
+  const total = num(r && r.count);
+  if (total <= 0 || !hasVacancyFigure(r)) return null;
+  return Math.max(0, Math.min(100, (occupiedUnitsOf(r) / total) * 100));
+}
+
 function unitMixTotals(rows) {
-  let units = 0, sf = 0, rentTotal = 0, rentedUnits = 0;
+  let units = 0, sf = 0, rentTotal = 0, rentedUnits = 0, vacant = 0, knownVac = 0;
   (rows || []).forEach(r => {
     const c = num(r.count) || 0;
     units += c;
     sf += c * num(r.sqft);
+    if (hasVacancyFigure(r)) { vacant += Math.min(c, num(r.vacant_count)); knownVac += c; }
     const rent = num(r.ask_rent) || num(r.current_rent);
-    if (rent > 0) { rentTotal += rent * (c || 1); rentedUnits += (c || 1); }
+    /* Weight the average by OCCUPIED units, not total.
+       `count` includes vacants (the RR import sums the occupied block and the
+       VACANTS block) while `current_rent` is an average over leased units only.
+       Weighting by total would give a half-empty plan more pull on the in-place
+       average than it has leases to justify. Rows with no vacancy figure weight
+       by their full count, and a row carrying a rent but no count still counts
+       once — both preserve the pre-existing behaviour exactly. */
+    if (rent > 0) {
+      const w = c > 0 ? occupiedUnitsOf(r) : 1;
+      if (w > 0) { rentTotal += rent * w; rentedUnits += w; }
+    }
   });
   return {
     units,
     sf,
+    vacant,
+    /* Only meaningful over the rows that actually recorded occupancy — mixing in
+       rows that never did would read as 0% vacant and understate it. */
+    occPct: knownVac > 0 ? ((knownVac - vacant) / knownVac) * 100 : null,
     avgSf: units > 0 ? sf / units : 0,
     avgRent: rentedUnits > 0 ? rentTotal / rentedUnits : 0,
     psf: sf > 0 && rentTotal > 0 ? rentTotal / sf : 0,

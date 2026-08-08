@@ -32,6 +32,18 @@
 
 .pf-sub .kv { font-size: 13px; }
 
+/* Provenance, under the button: which workbook this record was read out of and
+   when. Small print on purpose — it is a receipt, not a control. The file name
+   is allowed to wrap for the same reason the picker's does: on a phone the name
+   is how `IC_v7` is told from `IC_v8`, and truncating it defeats the point. */
+.pf-stamp {
+  margin-top: 6px;
+  font-size: 11.5px; line-height: 1.35; color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.pf-stamp + .pf-stamp { margin-top: 2px; }
+.pf-stamp-file { font-weight: 600; }
+
 @media (min-width: 900px) {
   /* The file list is the one place this card can get tall — two columns keeps a
      20-file deal folder on one screen. Everything else stays single-column. */

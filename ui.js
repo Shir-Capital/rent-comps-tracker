@@ -20,6 +20,15 @@ const COLLAPSED = new Set();  // ui-only: collapsed row/card keys
 // Field rendering
 // ============================================================================
 
+/* Computations a `derived` field can name. Keyed by string so the field tables
+   stay plain data and can be regenerated from the schema later. */
+const DERIVED = {
+  occPct(r) {
+    const p = occPctOf(r);
+    return p == null ? '' : Number(p.toFixed(1)) + '%';
+  },
+};
+
 function fieldHtml(f, obj, path) {
   const v = obj[f.key] == null ? '' : obj[f.key];
   const dsa = `data-fpath="${esc(path)}" data-fkey="${esc(f.key)}"`;
@@ -30,6 +39,15 @@ function fieldHtml(f, obj, path) {
       optionsFor(f).map(o => `<option value="${esc(o)}"${o === v ? ' selected' : ''}>${esc(o)}</option>`)
     ).join('');
     control = `<select ${dsa}>${opts}</select>`;
+  } else if (f.type === 'derived') {
+    /* Read-only, computed from the row's other values — it occupies a real
+       column so the desktop table can show a number the analyst never types.
+       `data-fkey` is deliberately absent: the field-edit delegation keys off it,
+       and a derived cell must never be treated as an input target. */
+    const fn = DERIVED[f.compute];
+    const out = fn ? fn(obj) : '';
+    control = `<div class="derived" data-fpath="${esc(path)}" data-fderived="${esc(f.compute)}">${
+      out === '' || out == null ? '<span class="muted">—</span>' : esc(out)}</div>`;
   } else if (f.type === 'textarea') {
     control = `<textarea ${dsa} rows="2">${esc(v)}</textarea>`;
   } else if (f.type === 'category') {
@@ -176,6 +194,12 @@ const UMIX_COMP_EXTRA = [
   { key: 'notes',      label: 'Notes',    type: 'text' },
 ];
 const UMIX_SUBJECT_EXTRA = [
+  /* '# Units' above is the TOTAL for this plan+finish, vacants included, so it
+     ties to DASH!E10. This is how many of them are down. Leave it blank when you
+     do not know — blank means "unrecorded" and weights the rent average by the
+     full count; a 0 asserts the plan is fully leased. */
+  { key: 'vacant_count', label: 'Vac', type: 'number', row: 'vo', note: 'How many of the # Units are vacant. # Units is the TOTAL for this plan and finish (occupied + vacant), so it ties to the proforma\'s unit count. Leave blank if unknown — blank means unrecorded, 0 asserts the plan is fully leased.' },
+  { key: '_occ', label: 'Occ %', type: 'derived', compute: 'occPct', row: 'vo', note: 'Occupied share of this row, computed from # Units and Vac. The in-place average rent is weighted by OCCUPIED units, because Current $/Mo is an average over leased units only.' },
   { key: 'current_rent', label: 'Current $/Mo', type: 'number', row: 'ro' },
   { key: 'status',       label: 'Status',       type: 'select', options_ref: 'unitStatus', row: 'ro' },
 ];
@@ -186,6 +210,12 @@ function unitRowSummary(r, kind) {
   if (r.beds !== '' || r.baths !== '') bits.push(num(r.beds) + 'x' + num(r.baths));
   if (num(r.sqft) > 0) bits.push(int(r.sqft) + ' SF');
   if (num(r.count) > 0) bits.push(int(r.count) + 'u');
+  /* On a phone this bar IS the row, so the occupancy has to appear here or it is
+     invisible until the row is opened. Shown as the vacancy count because that
+     is the number that was typed; the percentage is in the open row. */
+  if (kind === 'subject' && hasVacancyFigure(r) && num(r.vacant_count) > 0) {
+    bits.push(int(r.vacant_count) + ' vac');
+  }
   const rent = kind === 'subject' ? num(r.current_rent) : num(r.ask_rent);
   if (rent > 0) {
     bits.push(money(rent));
@@ -240,19 +270,28 @@ function unitMixHeadHtml(kind) {
     + `<div></div></div>`;
 }
 
-function unitMixBlockHtml(list, kind, listPath) {
+/* One definition, used by both the initial render and the live refresh. These
+   were two copies of the same markup and had already drifted once. */
+function unitMixSummaryInner(list) {
   const t = unitMixTotals(list);
   const grouped = groupByBucket(list);
   const chips = BUCKETS.filter(b => (grouped[b.key] || []).length)
     .map(b => `${b.short}:${(grouped[b.key] || []).length}`).join('  ');
   const unassigned = grouped.unassigned.length;
-  return `<div class="umix-summary" data-umix-summary="${esc(listPath)}">
-      ${list.length} plan${list.length === 1 ? '' : 's'} · ${int(t.units)} units · ${int(t.sf)} SF
-      ${t.avgSf > 0 ? ' · avg ' + int(t.avgSf) + ' SF' : ''}
-      ${t.avgRent > 0 ? ' · avg ' + money(t.avgRent) : ''}
-      ${chips ? '<div class="tiny muted">' + esc(chips) + '</div>' : ''}
-      ${unassigned ? '<div class="tiny" style="color:#b91c1c">' + unassigned + ' plan(s) not assigned to a COMPS section</div>' : ''}
-    </div>
+  return `${list.length} plan${list.length === 1 ? '' : 's'} · ${int(t.units)} units · ${int(t.sf)} SF`
+    + (t.avgSf > 0 ? ' · avg ' + int(t.avgSf) + ' SF' : '')
+    + (t.avgRent > 0 ? ' · avg ' + money(t.avgRent) : '')
+    /* Vacancy is stated only when something recorded it, and it names how much
+       of the mix it covers — a 3%-vacant reading over 2 of 12 plans is not a
+       property-level vacancy and must not read like one. */
+    + (t.occPct == null ? ''
+       : ' · ' + Number(t.occPct.toFixed(1)) + '% occ' + (int(t.vacant) !== '0' ? ' (' + int(t.vacant) + ' vac)' : ''))
+    + (chips ? '<div class="tiny muted">' + esc(chips) + '</div>' : '')
+    + (unassigned ? '<div class="tiny" style="color:#b91c1c">' + unassigned + ' plan(s) not assigned to a COMPS section</div>' : '');
+}
+
+function unitMixBlockHtml(list, kind, listPath) {
+  return `<div class="umix-summary" data-umix-summary="${esc(listPath)}">${unitMixSummaryInner(list)}</div>
     <div class="umix-table umix-${esc(kind)}" data-umix-rows="${esc(listPath)}">
       ${list.length ? unitMixHeadHtml(kind) : ''}
       ${list.map((r, i) => unitRowHtml(r, i, kind, listPath)).join('') || '<div class="muted small">No floor plans yet.</div>'}
@@ -360,6 +399,13 @@ function refreshUnitRowChrome(inputEl) {
   if (chip) chip.textContent = short;
   const sec = $('.urow-sec', wrap);         // desktop: its own table column
   if (sec) sec.textContent = short;
+  /* Derived cells read other fields on the same row, so they go stale on any
+     keystroke — recompute them all rather than tracking which input feeds which. */
+  $$('.derived[data-fderived]', wrap).forEach(node => {
+    const fn = DERIVED[node.getAttribute('data-fderived')];
+    const out = fn ? fn(row) : '';
+    node.innerHTML = (out === '' || out == null) ? '<span class="muted">—</span>' : esc(out);
+  });
   wrap.classList.toggle('no-bucket', !bk);
   refreshUnitMixSummary(listPath);
   if (CURRENT_PHASE === 3) renderPhase3();
@@ -370,16 +416,7 @@ function refreshUnitMixSummary(listPath) {
   if (!node) return;
   const list = resolveUnitList(listPath);
   if (!list) return;
-  const t = unitMixTotals(list);
-  const grouped = groupByBucket(list);
-  const chips = BUCKETS.filter(b => (grouped[b.key] || []).length)
-    .map(b => `${b.short}:${(grouped[b.key] || []).length}`).join('  ');
-  const unassigned = grouped.unassigned.length;
-  node.innerHTML = `${list.length} plan${list.length === 1 ? '' : 's'} · ${int(t.units)} units · ${int(t.sf)} SF`
-    + (t.avgSf > 0 ? ' · avg ' + int(t.avgSf) + ' SF' : '')
-    + (t.avgRent > 0 ? ' · avg ' + money(t.avgRent) : '')
-    + (chips ? '<div class="tiny muted">' + esc(chips) + '</div>' : '')
-    + (unassigned ? '<div class="tiny" style="color:#b91c1c">' + unassigned + ' plan(s) not assigned to a COMPS section</div>' : '');
+  node.innerHTML = unitMixSummaryInner(list);
 }
 
 function rerenderUnitMix(listPath) {

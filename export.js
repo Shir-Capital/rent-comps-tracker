@@ -252,7 +252,14 @@ function buildPopulatorPayload() {
         type: (function () { const k = bucketFor(r.beds, r.baths); return k ? bucketTypeLabel(k) : ''; })(),
         bucket: bucketFor(r.beds, r.baths),
         name: r.plan || '',
+        /* TOTAL units for the plan+finish, vacants included — this is what ties
+           to DASH!E10. `occupied` and `vacant` split it; `rent` is an average
+           over the OCCUPIED units only, which is why the split has to travel
+           with it rather than being re-derived downstream. */
         count: num(r.count) || 1,
+        occupied: hasVacancyFigure(r) ? occupiedUnitsOf(r) : null,
+        vacant: hasVacancyFigure(r) ? Math.min(num(r.count), num(r.vacant_count)) : null,
+        occupancy_pct: occPctOf(r),
         sf: numOrNull(r.sqft),
         rent: numOrNull(r.current_rent),
         status: r.status || '',

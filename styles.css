@@ -248,6 +248,16 @@ input.invalid { border-color: var(--err); background: var(--err-bg); }
 .field-row { display: flex; gap: 7px; }
 .field-row > .field { flex: 1 1 0; min-width: 0; }
 
+/* A computed, read-only cell. Sized like an input so it lines up with the real
+   ones in the unit-mix table, but deliberately not styled AS an input — it is
+   not typeable and must not look like it is. */
+.derived {
+  display: flex; align-items: center;
+  min-height: 38px; padding: 6px 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
 /* -------------------------------------------------------------- buttons */
 button.btn, .drawer button {
   font: inherit;
@@ -738,6 +748,7 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   /* Labels live in the header row, so per-row labels would be printed 4-10 times. */
   .urow-body .field { margin-bottom: 0; grid-column: auto; }
   .urow-body .field label { display: none; }
+  .urow-body .derived { min-height: 30px; padding: 2px 4px; font-size: 13px; }
   .urow-body > .note { grid-column: 1 / -1; }
 
   /* Which COMPS section the plan lands in. Hiding the accordion bar on desktop
@@ -764,7 +775,14 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   }
   .umix-subject .umix-head, .umix-subject .urow-body {
     grid-template-columns:
-      44px minmax(80px, 1.6fr) 52px 52px 66px 62px 92px minmax(96px, 1fr) 62px;
+      44px                 /* Section */
+      minmax(80px, 1.6fr)  /* Floor Plan */
+      52px 52px            /* Beds, Baths */
+      66px 62px            /* SF, # Units (TOTAL, incl. vacant) */
+      50px 58px            /* Vac, Occ % (derived) */
+      92px                 /* Current $/Mo */
+      minmax(90px, 1fr)    /* Status */
+      62px;                /* actions */
   }
 
   /* ============================== 3. ATTRIBUTES ========================== */

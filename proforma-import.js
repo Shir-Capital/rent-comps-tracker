@@ -57,10 +57,10 @@ const PF_TIER_LABEL = {
   Junior: 'Acq Team', InitUW: 'Init UW', '': 'no tier marker',
 };
 
-let PF = { step: 'idle', busy: '', files: [], pickId: '', parsed: null, error: '' };
+let PF = { step: 'idle', busy: '', files: [], pickId: '', parsed: null, error: '', confirmReplace: '' };
 
 function pfResetImport() {
-  PF = { step: 'idle', busy: '', files: [], pickId: '', parsed: null, error: '' };
+  PF = { step: 'idle', busy: '', files: [], pickId: '', parsed: null, error: '', confirmReplace: '' };
 }
 
 // ---------------------------------------------------------------- discovery
@@ -185,6 +185,300 @@ function pfBandLabel(label) {
 function pfPlanBedBath(name) {
   const m = /(\d+(?:\.\d+)?)\s*B\s*(\d+(?:\.\d+)?)\s*B/i.exec(String(name || ''));
   return m ? [parseFloat(m[1]), parseFloat(m[2])] : null;
+}
+
+/** Leading number out of a text cell. '1(.5)' -> 1 · 'Eff' -> 0 · '' -> null. */
+function pfNumLead(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  const s = pfS(v);
+  if (!s) return null;
+  if (/^(eff|studio|std)/i.test(s)) return 0;
+  const m = s.match(/-?\d+(?:\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+}
+
+// ---------------------------------------------------------- the DASH reader
+//
+// DASH is the authority on the property's identity, and the COMPS tab simply has
+// nowhere to hold most of it — street address, city/state/zip and the market are
+// on DASH only. It is also the authority on the UNIT COUNT: `COMPS!C4` is
+// supposed to be `=DASH!E10`, but on a workbook old enough it is a hardcoded
+// number that no longer tracks. Miramar's Init UW v2 carries 272 there against
+// DASH's real 143 — reconciling the imported mix against that cell would report
+// a 129-unit shortfall that does not exist.
+//
+// Every field is found by its LABEL in the label column, then the first non-empty
+// cell to its right. Row numbers move between template versions; these labels
+// have not.
+
+const PF_DASH_FIELDS = [
+  ['name', /^name$/i],
+  ['address', /^address$/i],
+  ['citystatezip', /^city\s*,?\s*st\s*,?\s*zip$/i],
+  ['msa', /^market$/i],
+  ['year_built', /^built\s*\/\s*renovated$/i],
+  ['total_units', /^number of units$/i],
+  ['occupancy_pct', /^current physical occ/i],
+];
+
+/* The stock template ships prompts in these cells — 'Prop Name', 'Prop Street',
+   'Prop City, ST, Zip', 'Market Name', 'Year Built'. A deal file copied from the
+   template but not yet filled in still carries them, and importing them writes
+   a subject called "Prop Name". */
+const PF_DASH_PLACEHOLDER = /^(prop\b|market name$|year built$|address$|name$|city\s*,?\s*st\s*,?\s*zip$)/i;
+
+function pfReadDash(ws) {
+  const { maxRow, maxCol } = pfRange(ws);
+  const out = {};
+  const lastRow = Math.min(maxRow, 60), lastCol = Math.min(maxCol, 12);
+  for (let r = 1; r <= lastRow; r++) {
+    for (let c = 1; c <= lastCol; c++) {
+      const lbl = pfS(pfV(ws, r, c));
+      if (!lbl) continue;
+      const hit = PF_DASH_FIELDS.find(([k, rx]) => rx.test(lbl) && out[k] === undefined);
+      if (!hit) continue;
+      for (let vc = c + 1; vc <= lastCol; vc++) {
+        const v = pfV(ws, r, vc);
+        if (v === undefined || v === '') continue;
+        if (typeof v === 'string' && PF_DASH_PLACEHOLDER.test(v.trim())) break;  // unfilled template
+        out[hit[0]] = v;
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** "Austin, TX 78750" -> {city, state, zip}. Anything else -> city only. */
+function pfSplitCityStateZip(s) {
+  const txt = pfS(s);
+  if (!txt) return {};
+  const m = /^(.*?),\s*([A-Za-z]{2})\s+([\d-]{5,10})\s*$/.exec(txt);
+  if (m) return { city: m[1].trim(), state: m[2].toUpperCase(), zip: m[3] };
+  const m2 = /^(.*?),\s*([A-Za-z]{2})\s*$/.exec(txt);
+  if (m2) return { city: m2[1].trim(), state: m2[2].toUpperCase() };
+  return { city: txt };
+}
+
+/** '1984' or '1984 / 2019' -> '1984'. */
+function pfYear(v) {
+  if (typeof v === 'number' && isFinite(v)) return String(Math.round(v));
+  const m = /\b(1[89]\d{2}|20\d{2})\b/.exec(pfS(v));
+  return m ? m[1] : '';
+}
+
+// ------------------------------------------------------------ the RR reader
+//
+// The RR tab is the RIGHT source for the subject unit mix, and the COMPS
+// subject block is a poor substitute for it. `COMPS!C6` is
+// `SUMIF(RR!$C$6:$C$365, COMPS!$B6, RR!$E$6:$E$365)`, which does three things
+// that lose data: it collapses Original/Partial/Reno into one row per plan, its
+// range stops at row 365 so it never sees the VACANTS block, and it drops any
+// plan with no matching label. On Lantern that block totals 176 units against
+// DASH's 316.
+//
+// RR carries TWO unit-mix blocks with identical column layouts: the top one is
+// OCCUPIED units only (which is why `U Mix Sum` is footnoted "* Leased Only"),
+// and a second under a `VACANTS` banner. Total units is the sum of the pair;
+// the in-place rent lives only on the occupied side. Both blocks are found by
+// scanning for their labels — the row numbers happen to be 6-350 and 401-750 on
+// both the v7 and v8 templates, and neither number is written down here.
+
+const PF_RR_STATUS = /^(original|partial|reno)$/i;
+
+/** Column map for an RR unit-mix header row, by label. */
+function pfRRCols(ws, hdr, maxCol) {
+  const cols = {};
+  let inPlaceAt = 0, marketAt = 0;
+  // Row above the header carries the group banners that disambiguate the two
+  // identical '$/Mo' columns — In-Place at K, Market at R.
+  for (let c = 1; c <= maxCol; c++) {
+    const g = pfS(pfV(ws, hdr - 1, c)).toLowerCase();
+    if (/^in.?place/.test(g) && !inPlaceAt) inPlaceAt = c;
+    if (/^market/.test(g) && !marketAt) marketAt = c;
+  }
+  for (let c = 1; c <= maxCol; c++) {
+    const l = pfS(pfV(ws, hdr, c)).toLowerCase().replace(/\s+/g, ' ').replace(/\.$/, '');
+    if (!l) continue;
+    if (l === 'unit name' && !cols.plan) cols.plan = c;
+    else if (l === 'status' && !cols.status) cols.status = c;
+    else if (l === '# units' && !cols.units) cols.units = c;
+    else if (l === '# brs' && !cols.beds) cols.beds = c;
+    else if (l === '# bas' && !cols.baths) cols.baths = c;
+    else if (l === 'sf/ unit' || l === 'sf/unit') { if (!cols.sf) cols.sf = c; }
+    else if (l === '$/mo') {
+      // Two columns share this label; the banner above decides which is which.
+      if (marketAt && c >= marketAt) { if (!cols.market) cols.market = c; }
+      else if (inPlaceAt && c >= inPlaceAt) { if (!cols.inPlace) cols.inPlace = c; }
+      else if (!cols.inPlace) cols.inPlace = c;
+    }
+  }
+  return cols;
+}
+
+/**
+ * Where a unit-mix block stops.
+ *
+ * Load-bearing: RR continues past the mix into the LEASE-LEVEL table (header
+ * `Unit Type Name` around row 800), whose rows also carry a plan name in the
+ * plan column and `Reno`/`Unreno` in the status column — and whose `# Units`
+ * column holds the UNIT NUMBER. Scanning into it sums unit numbers as unit
+ * counts: on Lantern that read 1,431,784 units instead of 316.
+ */
+const PF_RR_TERMINAL = /^(occupied|all vacant|all|vacant|grand tot|unit type name)\b/i;
+
+function pfRRBlockEnd(ws, first, hardEnd, cols) {
+  for (let r = first; r <= hardEnd; r++) {
+    const p = pfS(pfV(ws, r, cols.plan));
+    if (p && PF_RR_TERMINAL.test(p)) return r - 1;
+  }
+  return hardEnd;
+}
+
+/**
+ * Section labels, harvested from the block's own `Subtotal/Avg <label>` rows.
+ *
+ * Each section is followed by a three-row roll-up BY FINISH whose plan cell
+ * holds the section label rather than a plan name (`2x1(.5)` / Original,
+ * Partial, Reno) — a shape indistinguishable from a real plan row by type
+ * alone. Reading those as plans double-counts every section.
+ */
+function pfRRSectionLabels(ws, first, last, cols) {
+  const set = new Set();
+  for (let r = first; r <= last; r++) {
+    const m = /^subtotal\s*\/\s*avg\s+(.+)$/i.exec(pfS(pfV(ws, r, cols.plan)));
+    if (m) set.add(m[1].trim().toLowerCase());
+  }
+  return set;
+}
+
+/** Data rows of one RR unit-mix block, from `first` until its summary rows. */
+function pfRRBlock(ws, first, lastBound, cols, sections) {
+  const out = [];
+  for (let r = first; r <= lastBound; r++) {
+    const plan = pfS(pfV(ws, r, cols.plan));
+    const status = pfS(pfV(ws, r, cols.status));
+    if (!plan || /^subtotal/i.test(plan) || PF_RR_TERMINAL.test(plan)) continue;
+    if (sections && sections.has(plan.toLowerCase())) continue;   // section roll-up
+    if (!PF_RR_STATUS.test(status)) continue;
+    out.push({
+      row: r,
+      plan,
+      status: status.charAt(0).toUpperCase() + status.slice(1).toLowerCase(),
+      units: pfN(pfV(ws, r, cols.units)) || 0,
+      beds: pfNumLead(pfV(ws, r, cols.beds)),
+      baths: pfNumLead(pfV(ws, r, cols.baths)),
+      sf: cols.sf ? pfN(pfV(ws, r, cols.sf)) : null,
+      inPlace: cols.inPlace ? pfN(pfV(ws, r, cols.inPlace)) : null,
+      market: cols.market ? pfN(pfV(ws, r, cols.market)) : null,
+    });
+  }
+  return out;
+}
+
+/**
+ * Read the subject unit mix out of an RR worksheet.
+ * Returns null when the tab does not look like an RR unit mix, so the caller can
+ * fall back to the COMPS subject block rather than importing an empty mix.
+ */
+function pfReadRR(ws) {
+  const { maxRow, maxCol } = pfRange(ws);
+  const scanTo = Math.min(maxRow, 1000);
+
+  let hdr = 0;
+  for (let r = 1; r <= Math.min(30, maxRow) && !hdr; r++) {
+    for (let c = 1; c <= Math.min(20, maxCol); c++) {
+      if (pfS(pfV(ws, r, c)).toLowerCase() === 'unit name') { hdr = r; break; }
+    }
+  }
+  if (!hdr) return null;
+
+  const cols = pfRRCols(ws, hdr, Math.min(maxCol, 40));
+  if (!cols.plan || !cols.status || !cols.units) return null;
+
+  // The VACANTS banner sits in the plan column, on its own row.
+  let vacBanner = 0;
+  for (let r = hdr + 1; r <= scanTo && !vacBanner; r++) {
+    if (/^vacants?$/i.test(pfS(pfV(ws, r, cols.plan)))) vacBanner = r;
+  }
+
+  const occFirst = hdr + 1;
+  const occLast = pfRRBlockEnd(ws, occFirst, vacBanner ? vacBanner - 1 : scanTo, cols);
+  const occSections = pfRRSectionLabels(ws, occFirst, occLast, cols);
+  const occupied = pfRRBlock(ws, occFirst, occLast, cols, occSections);
+
+  let vacant = [];
+  if (vacBanner) {
+    const vFirst = vacBanner + 1;
+    const vLast = pfRRBlockEnd(ws, vFirst, scanTo, cols);
+    vacant = pfRRBlock(ws, vFirst, vLast, cols, pfRRSectionLabels(ws, vFirst, vLast, cols));
+  }
+  if (!occupied.length && !vacant.length) return null;
+
+  // Stated totals, for the reconciliation the preview shows. Located by label.
+  const stated = {};
+  for (let r = hdr + 1; r <= scanTo; r++) {
+    const p = pfS(pfV(ws, r, cols.plan)), d = pfS(pfV(ws, r, cols.status));
+    const n = pfN(pfV(ws, r, cols.units));
+    if (n === null) continue;
+    if (/^subtotal\/avg occupied$/i.test(p)) stated.occupied = n;
+    else if (/^grand tot/i.test(p)) stated.grand = n;
+    else if (/^all vacant$/i.test(p) && /^vac tot/i.test(d)) stated.vacant = n;
+  }
+
+  /* Full OUTER join on plan+finish. A 100%-vacant plan exists only in the
+     second block and still has to produce a row — left-joining the occupied
+     block would drop it and undercount the property. */
+  const key = x => x.plan.toLowerCase() + ' | ' + x.status.toLowerCase();
+  const byKey = new Map();
+  const order = [];
+  const slot = x => {
+    const k = key(x);
+    if (!byKey.has(k)) {
+      byKey.set(k, {
+        plan: x.plan, status: x.status, beds: x.beds, baths: x.baths,
+        sf: null, occUnits: 0, vacUnits: 0, inPlace: null, market: null,
+      });
+      order.push(k);
+    }
+    return byKey.get(k);
+  };
+
+  occupied.forEach(x => {
+    if (!x.units) return;
+    const t = slot(x);
+    t.occUnits += x.units;
+    if (t.sf == null && x.sf) t.sf = x.sf;
+    if (t.inPlace == null && x.inPlace) t.inPlace = x.inPlace;
+    if (t.market == null && x.market) t.market = x.market;
+    if (t.beds == null) t.beds = x.beds;
+    if (t.baths == null) t.baths = x.baths;
+  });
+  vacant.forEach(x => {
+    if (!x.units) return;
+    const t = slot(x);
+    t.vacUnits += x.units;
+    // A fully-vacant plan has no SF or market rent on the occupied side.
+    if (t.sf == null && x.sf) t.sf = x.sf;
+    if (t.market == null && x.market) t.market = x.market;
+    if (t.beds == null) t.beds = x.beds;
+    if (t.baths == null) t.baths = x.baths;
+  });
+
+  const rows = order.map(k => byKey.get(k))
+    .map(t => Object.assign(t, { units: t.occUnits + t.vacUnits }))
+    .filter(t => t.units > 0);
+
+  return {
+    rows,
+    stated,
+    totals: {
+      units: rows.reduce((a, t) => a + t.units, 0),
+      occupied: rows.reduce((a, t) => a + t.occUnits, 0),
+      vacant: rows.reduce((a, t) => a + t.vacUnits, 0),
+    },
+    hadVacantsBlock: !!vacBanner,
+  };
 }
 
 // -------------------------------------------------------------- the reader
@@ -379,25 +673,118 @@ function pfToImport(det) {
   const warn = [];
   const FEE_ROWS = (SCHEMA.fees || []).filter(f => f.compsRow);
 
+  const dash = det.dash || {};
+  const loc = pfSplitCityStateZip(dash.citystatezip);
+
+  /* COMPS!B3 is `="Property: "&DASH!E5`, so the name placeholder survives the
+     DASH filter by arriving through the fallback instead. */
+  const fallbackName = pfS(det.subject.name);
   const subject = {
-    name: det.subject.name || '',
-    year_built: pfNumStr(det.subject.year_built),
-    total_units: pfNumStr(det.subject.units_stated),
+    name: pfS(dash.name) || (PF_DASH_PLACEHOLDER.test(fallbackName) ? '' : fallbackName),
+    address: streetOnly(pfS(dash.address)),
+    city: loc.city || '',
+    state: loc.state || '',
+    zip: loc.zip || '',
+    msa: pfS(dash.msa),
+    year_built: pfYear(dash.year_built !== undefined ? dash.year_built : det.subject.year_built),
+    /* DASH over the COMPS header: `COMPS!C4` is meant to be `=DASH!E10` but on
+       older workbooks it is a stale hardcode (Miramar: 272 vs a real 143). */
+    total_units: pfNumStr(dash.total_units !== undefined ? pfN(dash.total_units) : det.subject.units_stated),
     occupancy_pct: '',
     wd_type: pfOption(det.subject.wd, SCHEMA.wdTypes),
     util_structure: pfOption(det.subject.util, SCHEMA.utilStructures),
   };
+
+  /* Is there anything in this workbook at all? An unfilled copy of the template
+     has a DASH, a COMPS tab and an RR — all empty — and every "0" in it would
+     otherwise import as a real measurement. */
+  const hasUnitData = !!(det.rr && det.rr.rows.length) || det.subject.types.length > 0;
+
+  /* Occupancy: DASH's own physical-occupancy figure first, the COMPS vacancy
+     cell (itself `=DASH!N5`) as the fallback. A zero on an empty workbook is an
+     empty cell, not a fully-leased property — hence the hasUnitData gate, without
+     which a blank template imports as "100% occupied". */
+  const dashOcc = pfN(dash.occupancy_pct);
   const vac = pfN(det.subject.vacancy);
-  if (vac !== null && vac >= 0 && vac <= 1.5) {
+  if (dashOcc !== null && dashOcc > 0 && dashOcc <= 1.5) {
+    subject.occupancy_pct = String(Number((dashOcc * 100).toFixed(1)));
+  } else if (hasUnitData && vac !== null && vac >= 0 && vac <= 1.5) {
     subject.occupancy_pct = String(Number(((1 - vac) * 100).toFixed(1)));
   }
+  if (!hasUnitData) {
+    warn.push('This workbook has no unit mix on RR and none on the COMPS subject block — '
+      + 'it looks like a template copy that has not been underwritten yet. Check the file before applying.');
+  }
 
-  const subjectUnitMix = det.subject.types.map(t => ({
-    id: uid(), plan: t.plan,
-    beds: pfNumStr(t.bb ? t.bb[0] : null), baths: pfNumStr(t.bb ? t.bb[1] : null),
-    sqft: pfNumStr(t.sf), count: pfNumStr(t.units),
-    status: '', current_rent: pfNumStr(t.eff_mo, 0),
-  }));
+  /* A COMPS header that disagrees with DASH is a stale hardcode, and it is worth
+     saying so — it is the number a reader of the COMPS tab sees. */
+  const dashUnits = pfN(dash.total_units), compsUnits = pfN(det.subject.units_stated);
+  if (dashUnits !== null && compsUnits !== null && Math.abs(dashUnits - compsUnits) > 0.5) {
+    warn.push('COMPS header says ' + Math.round(compsUnits) + ' units but DASH says '
+      + Math.round(dashUnits) + ' — the COMPS cell is a stale hardcode, not =DASH!E10. '
+      + 'DASH was used.');
+  }
+  /* What the imported mix is reconciled against, everywhere below. */
+  const statedUnits = dashUnits !== null ? dashUnits : compsUnits;
+
+  /* Subject unit mix: RR when the workbook has one, the COMPS subject block
+     only as a fallback. See pfReadRR() for why the fallback is a poor one. */
+  let subjectUnitMix, mixSource, mixTotals = null;
+  if (det.rr && det.rr.rows.length) {
+    mixSource = 'RR';
+    mixTotals = det.rr.totals;
+    subjectUnitMix = det.rr.rows.map(t => {
+      const row = newSubjectUnitRow();
+      row.plan = t.plan;
+      row.beds = pfNumStr(t.beds);
+      row.baths = pfNumStr(t.baths);
+      row.sqft = pfNumStr(t.sf);
+      row.count = pfNumStr(t.units);            // TOTAL: occupied + vacant
+      row.vacant_count = String(t.vacUnits);    // always known from the two blocks
+      row.status = pfOption(t.status, SCHEMA.unitStatus);
+      row.current_rent = pfNumStr(t.inPlace, 0);
+      return row;
+    });
+
+    if (!det.rr.hadVacantsBlock) {
+      warn.push('RR has no VACANTS block — every plan was imported as fully occupied. '
+        + 'Check the unit counts against the rent roll before relying on them.');
+    }
+    const st = det.rr.stated;
+    if (st.grand != null && Math.abs(st.grand - mixTotals.units) > 0.5) {
+      warn.push('Imported unit mix totals ' + Math.round(mixTotals.units)
+        + ' units but RR\'s own Grand Tot/Avg says ' + Math.round(st.grand) + ' — some rows were not read');
+    }
+    if (statedUnits !== null && Math.abs(statedUnits - mixTotals.units) > 0.5) {
+      warn.push('Imported unit mix totals ' + Math.round(mixTotals.units)
+        + ' units against the proforma\'s stated ' + Math.round(statedUnits)
+        + '. Verify before exporting.');
+    }
+    const bad = subjectUnitMix.filter(r => !r.status).length;
+    if (bad) warn.push(bad + ' subject plan(s) carry a finish the tracker does not recognise');
+  } else {
+    mixSource = 'COMPS';
+    subjectUnitMix = det.subject.types.map(t => {
+      const row = newSubjectUnitRow();
+      row.plan = t.plan;
+      row.beds = pfNumStr(t.bb ? t.bb[0] : null);
+      row.baths = pfNumStr(t.bb ? t.bb[1] : null);
+      row.sqft = pfNumStr(t.sf);
+      row.count = pfNumStr(t.units);
+      row.vacant_count = '';   // unknowable from COMPS — blank, never 0
+      row.status = '';
+      row.current_rent = pfNumStr(t.eff_mo, 0);
+      return row;
+    });
+    if (subjectUnitMix.length) {
+      const tot = subjectUnitMix.reduce((a, r) => a + num(r.count), 0);
+      warn.push('No readable RR unit mix — the subject mix came from the COMPS subject block, '
+        + 'which merges Original/Partial/Reno into one row per plan and cannot see vacant units'
+        + (statedUnits !== null && Math.abs(statedUnits - tot) > 0.5
+            ? ' (it totals ' + Math.round(tot) + ' units against the stated ' + Math.round(statedUnits) + ')' : '')
+        + '. Finish and vacancy were left blank rather than guessed.');
+    }
+  }
 
   const comps = det.comps.slice(0, MAX_COMPS).map(c => {
     const comp = newComp();
@@ -504,7 +891,8 @@ function pfToImport(det) {
     if (bucket) marketRents[bucket.key] = { override: pfNumStr(b.mkt_mo, 0) };
   });
 
-  return { subject, subjectUnitMix, comps, marketRents, warnings: warn, stride: det.stride };
+  return { subject, subjectUnitMix, comps, marketRents, warnings: warn, stride: det.stride,
+           mixSource, mixTotals };
 }
 
 // ------------------------------------------------------------------ the UI
@@ -569,7 +957,8 @@ function pfImportCardHtml() {
       <div class="btn-row">
         <button class="btn primary small" id="btn-pf-start"${linked ? '' : ' disabled'}>⤓ Import from Proforma</button>
       </div>
-      ${linked ? '' : '<div class="tiny muted" style="margin-top:6px">Link a Drive deal folder first — the proformas are read from it.</div>'}`;
+      ${linked ? '' : '<div class="tiny muted" style="margin-top:6px">Link a Drive deal folder first — the proformas are read from it.</div>'}
+      ${['subject', 'unitMix', 'comps', 'marketRents'].map(pfStampHtml).filter(Boolean).join('')}`;
   }
 
   return `<div class="card" id="pf-card">
@@ -582,7 +971,9 @@ function pfPreviewHtml() {
   const p = PF.parsed, f = pfPickedFile();
   const s = STATE.subject || {};
   const subjRows = [
-    ['name', 'Property name'], ['year_built', 'Year built'], ['total_units', 'Total units'],
+    ['name', 'Property name'], ['address', 'Address'], ['city', 'City'],
+    ['state', 'State'], ['zip', 'ZIP'], ['msa', 'Market'],
+    ['year_built', 'Year built'], ['total_units', 'Total units'],
     ['occupancy_pct', 'Occupancy %'], ['wd_type', 'W/D type'], ['util_structure', 'Utilities'],
   ].filter(([k]) => p.subject[k] !== '' && p.subject[k] !== undefined)
    .map(([k, lbl]) => {
@@ -607,10 +998,16 @@ function pfPreviewHtml() {
   const nComps = (STATE.comps || []).length;
   const nMix = (STATE.subjectUnitMix || []).length;
 
+  const mt = p.mixTotals;
+  const mixNote = p.mixSource === 'RR'
+    ? `RR · ${int(mt.units)} units (${int(mt.occupied)} occ / ${int(mt.vacant)} vac)`
+    : 'COMPS subject block — no vacancy';
+
   return `
     <div class="kv"><span class="k">Source</span><span class="v">${esc(f ? f.name : '—')}</span></div>
     <div class="kv"><span class="k">Comp block geometry</span>
       <span class="v">${p.stride === 9 ? 'MF v7 (9-col)' : 'ExStay (' + p.stride + '-col)'}</span></div>
+    <div class="kv"><span class="k">Unit mix read from</span><span class="v">${esc(mixNote)}</span></div>
     <hr class="hr-soft"/>
     <div class="pf-grps">
       ${grp('pf-g-subject', 'Subject basics', Object.keys(p.subject).filter(k => p.subject[k] !== '').length, '')}
@@ -622,11 +1019,19 @@ function pfPreviewHtml() {
     ${compRows ? `<hr class="hr-soft"/><div class="pf-sub">${compRows}</div>` : ''}
     ${p.warnings.length ? `<hr class="hr-soft"/>${p.warnings.map(w =>
       `<div class="chk warn"><span class="ico">!</span><span>${esc(w)}</span></div>`).join('')}` : ''}
-    <div class="btn-row" style="margin-top:9px">
+    ${PF.confirmReplace ? `<hr class="hr-soft"/>
+      <div class="chk err"><span class="ico">!</span><span>${esc(PF.confirmReplace)}
+        This cannot be undone from here — the previous values are only in this deal's
+        Drive backups.</span></div>
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn primary small danger" id="btn-pf-apply">Yes, replace</button>
+        <button class="btn small" id="btn-pf-keep">Keep what I have</button>
+      </div>`
+    : `<div class="btn-row" style="margin-top:9px">
       <button class="btn primary small" id="btn-pf-apply">Apply checked</button>
       <button class="btn small" id="btn-pf-back">Back</button>
       <button class="btn small" id="btn-pf-cancel">Cancel</button>
-    </div>`;
+    </div>`}`;
 }
 
 function pfRerender() {
@@ -642,7 +1047,8 @@ function pfWire() {
   on('btn-pf-start', pfStart);
   on('btn-pf-read', pfRead);
   on('btn-pf-apply', pfApply);
-  on('btn-pf-back', () => { PF.step = 'list'; PF.parsed = null; pfRerender(); });
+  on('btn-pf-back', () => { PF.step = 'list'; PF.parsed = null; PF.confirmReplace = ''; pfRerender(); });
+  on('btn-pf-keep', () => { PF.confirmReplace = ''; pfRerender(); });
   on('btn-pf-cancel', () => { pfResetImport(); pfRerender(); });
   on('btn-pf-reset', () => { pfResetImport(); pfRerender(); });
   $$('#pf-card input[name="pf-file"]').forEach(r => {
@@ -687,7 +1093,28 @@ async function pfRead() {
     const wb = XLSX.read(new Uint8Array(buf), { type: 'array', cellNF: true, cellStyles: false });
     const sheet = wb.SheetNames.find(n => n.trim().toUpperCase() === 'COMPS');
     if (!sheet) throw new Error('That workbook has no COMPS tab');
-    PF.parsed = pfToImport(pfReadComps(wb.Sheets[sheet]));
+    const det = pfReadComps(wb.Sheets[sheet]);
+
+    /* The subject unit mix comes off RR when there is one. Its absence is not an
+       error — an ExStay workbook keeps the same table on UNITS, and some early
+       files have neither — so a failure here downgrades to the COMPS block
+       rather than failing the whole import. */
+    const rrName = wb.SheetNames.find(n => n.trim().toUpperCase() === 'RR')
+      || wb.SheetNames.find(n => n.trim().toUpperCase() === 'UNITS');
+    if (rrName) {
+      try { det.rr = pfReadRR(wb.Sheets[rrName]); }
+      catch (e) { console.warn('RR read failed, falling back to the COMPS block', e); det.rr = null; }
+    }
+
+    /* DASH holds the address, city/state/zip and market that the COMPS tab has
+       no cell for, and the authoritative unit count. Also non-fatal. */
+    const dashName = wb.SheetNames.find(n => n.trim().toUpperCase() === 'DASH');
+    if (dashName) {
+      try { det.dash = pfReadDash(wb.Sheets[dashName]); }
+      catch (e) { console.warn('DASH read failed', e); det.dash = null; }
+    }
+
+    PF.parsed = pfToImport(det);
     PF.step = 'preview';
   } catch (e) {
     console.error('pfRead', e);
@@ -706,10 +1133,18 @@ function pfApply() {
   const doComps = want('pf-g-comps'), doRents = want('pf-g-rents');
   if (!doSubject && !doMix && !doComps && !doRents) { toast('Nothing checked'); return; }
 
+  /* Two-press confirmation rather than confirm(). A native dialog cannot be
+     dismissed by anything driving this page, and this is the one button in the
+     app that destroys captured field work — it needs to be scriptable so the
+     re-import of a whole pipeline can be checked, not just clicked. */
   const lost = [];
   if (doMix && (STATE.subjectUnitMix || []).length) lost.push(STATE.subjectUnitMix.length + ' subject plan(s)');
   if (doComps && (STATE.comps || []).length) lost.push(STATE.comps.length + ' captured comp(s)');
-  if (lost.length && !confirm('This replaces ' + lost.join(' and ') + '.\n\nContinue?')) return;
+  if (lost.length && !PF.confirmReplace) {
+    PF.confirmReplace = 'This replaces ' + lost.join(' and ') + '.';
+    pfRerender();
+    return;
+  }
 
   const applied = [];
   if (doSubject) {
@@ -736,15 +1171,53 @@ function pfApply() {
     applied.push(Object.keys(p.marketRents).length + ' market rents');
   }
 
+  /* Provenance, recorded as data rather than appended to the notes textarea.
+     Keyed per group because the subject and the comps can legitimately come from
+     different revisions of a workbook, or different workbooks entirely, and a
+     line of prose in `notes` cannot say which half came from where — nor survive
+     the analyst editing the field. It rides serializeProperty() to Drive, so a
+     teammate opening this on another device sees the same source. */
   const f = pfPickedFile();
-  const stamp = 'Imported ' + applied.join(', ') + ' from ' + (f ? f.name : 'a proforma')
-    + ' on ' + todayISO() + '.';
-  STATE.subject.notes = (STATE.subject.notes ? STATE.subject.notes + '\n' : '') + stamp;
+  const rec = () => ({
+    fileId: f ? f.id : '', fileName: f ? f.name : '',
+    driveModifiedTime: f ? f.modifiedTime : '',
+    importedAt: nowISO(),
+    importedBy: (typeof CURRENT_USER === 'object' && CURRENT_USER && CURRENT_USER.email) || '',
+  });
+  STATE.imports = STATE.imports || {};
+  if (doSubject) STATE.imports.subject = Object.assign(rec(), { fields: applied.includes('subject basics') ? 1 : 0 });
+  if (doMix) {
+    STATE.imports.unitMix = Object.assign(rec(), {
+      rows: p.subjectUnitMix.length,
+      source: p.mixSource,
+      units: p.mixTotals ? Math.round(p.mixTotals.units) : null,
+      vacant: p.mixTotals ? Math.round(p.mixTotals.vacant) : null,
+    });
+  }
+  if (doComps) STATE.imports.comps = Object.assign(rec(), { comps: p.comps.length });
+  if (doRents) STATE.imports.marketRents = Object.assign(rec(), { rents: Object.keys(p.marketRents).length });
 
   saveState();
   pfResetImport();
   toast('Imported ' + applied.join(' · '));
   renderPhase1();
+}
+
+/** "IC_v8.xlsx · 12 rows · 316u (116 vac) · imported 2h ago" */
+function pfStampHtml(key) {
+  const rec = STATE && STATE.imports && STATE.imports[key];
+  if (!rec || !rec.fileName) return '';
+  const bits = [];
+  if (rec.rows != null) bits.push(rec.rows + ' row' + (rec.rows === 1 ? '' : 's'));
+  if (rec.comps != null) bits.push(rec.comps + ' comp' + (rec.comps === 1 ? '' : 's'));
+  if (rec.units != null) bits.push(int(rec.units) + 'u' + (rec.vacant ? ' (' + int(rec.vacant) + ' vac)' : ''));
+  if (rec.source) bits.push('via ' + rec.source);
+  let abs = rec.importedAt;
+  try { abs = new Date(rec.importedAt).toLocaleString(); } catch (e) { /* keep the ISO */ }
+  return `<div class="pf-stamp" title="${esc(rec.fileName + ' — imported ' + abs
+      + (rec.importedBy ? ' by ' + rec.importedBy : ''))}">
+    <span class="pf-stamp-file">${esc(rec.fileName)}</span>${
+      bits.length ? ' · ' + esc(bits.join(' · ')) : ''} · imported ${esc(relTime(rec.importedAt))}</div>`;
 }
 
 // ------------------------------------------------------------ self-install
