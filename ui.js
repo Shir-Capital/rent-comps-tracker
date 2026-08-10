@@ -488,15 +488,194 @@ function wireTriDelegation(root) {
 // Home screen
 // ============================================================================
 
+/* ---- Home list state: sort (persisted per device) + Live/Archived view ---- */
+let HOME_SORT_FIELD = localStorage.getItem(HOME_SORT_FIELD_KEY) || 'modified'; // 'modified' | 'created' | 'name'
+let HOME_SORT_DIR   = localStorage.getItem(HOME_SORT_DIR_KEY)   || 'desc';     // 'asc' | 'desc'
+let HOME_VIEW_MODE  = 'live';                                                  // 'live' | 'archived'
+/* The icon legend is a <details>, and renderHome rebuilds the whole subtree —
+   so its open state has to live out here or the panel slams shut the moment the
+   index refresh lands a second after you open it. */
+let HOME_LEGEND_OPEN = false;
+
+function setHomeSort(field, dir) {
+  HOME_SORT_FIELD = field;
+  HOME_SORT_DIR = dir;
+  localStorage.setItem(HOME_SORT_FIELD_KEY, field);
+  localStorage.setItem(HOME_SORT_DIR_KEY, dir);
+  renderHome();
+}
+function homeSortDirLabel() {
+  if (HOME_SORT_FIELD === 'name') return HOME_SORT_DIR === 'asc' ? 'A → Z' : 'Z → A';
+  return HOME_SORT_DIR === 'asc' ? '↑ Oldest' : '↓ Newest';
+}
+
+/**
+ * Merge this device's subjects with the org-manifest entries by id ->
+ * [{local, remote}]. Shared by renderHome (display) and pullAllFromDrive (bulk
+ * pull) so both work off exactly the same set.
+ */
+function mergedHomeEntries() {
+  const merged = new Map();
+  Object.values(STORE.properties || {}).forEach(p => merged.set(p.id, { local: p, remote: null }));
+  const remote = (MANIFEST_CACHE && MANIFEST_CACHE.data && MANIFEST_CACHE.data.properties) || [];
+  remote.forEach(e => {
+    const cur = merged.get(e.id) || { local: null, remote: null };
+    cur.remote = e;
+    merged.set(e.id, cur);
+  });
+  return Array.from(merged.values());
+}
+
+function entryDisplayName({ local, remote }) {
+  return (local && local.name) || (remote && remote.name) || 'Untitled';
+}
+function entryModifiedMs({ local, remote }) {
+  const s = (remote && remote.lastModified) || (local && local.updated) || '';
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : 0;
+}
+function entryCreatedMs(e) {
+  if (e.local && e.local.created) {
+    const t = Date.parse(e.local.created);
+    if (Number.isFinite(t)) return t;
+  }
+  return entryModifiedMs(e);   // index-only entries carry no creation time
+}
+function sortHomeEntries(entries) {
+  const dir = HOME_SORT_DIR === 'asc' ? 1 : -1;
+  entries.sort((a, b) => {
+    let cmp;
+    if (HOME_SORT_FIELD === 'name') {
+      cmp = entryDisplayName(a).localeCompare(entryDisplayName(b), undefined, { sensitivity: 'base' });
+    } else if (HOME_SORT_FIELD === 'created') {
+      cmp = entryCreatedMs(a) - entryCreatedMs(b);
+    } else {
+      cmp = entryModifiedMs(a) - entryModifiedMs(b);
+    }
+    return cmp * dir;
+  });
+}
+
+/* The org manifest wins whenever it has an opinion: it survives the
+   reconcile-on-open that overwrites the local property JSON. */
+function isEntryArchived({ local, remote }) {
+  if (remote && remote.archived !== undefined) return !!remote.archived;
+  return !!(local && local.archived);
+}
+
+function pullAllBtnLabel() {
+  if (!HOME_PULL_ALL_RUNNING) return '⤓ Update All Subjects';
+  const p = HOME_PULL_ALL_PROGRESS;
+  return (p && p.total) ? `⤓ Updating ${p.done}/${p.total}…` : '⤓ Updating…';
+}
+/* Text-only update per item: a full renderHome per subject would throw away the
+   legend's open state and the row's sideways scroll position on every tick. */
+function paintPullAllProgress() {
+  const b = document.querySelector('[data-pull-all-btn]');
+  if (b) b.textContent = pullAllBtnLabel();
+}
+
+/**
+ * The home header box. SHIR-navy, ALWAYS exactly two rows — nothing wraps to a
+ * third line; a narrow phone scrolls a row sideways instead (`.home-hdr-row`,
+ * same pattern as the comps button row).
+ *   row 1  + New Subject / Archived / index status · who / Update All / Refresh
+ *   row 2  data-pulled stamp / sort controls / the icon legend
+ */
+function homeHeaderHtml(archivedCount, showSort) {
+  const archived = HOME_VIEW_MODE === 'archived';
+
+  const statusText = HOME_INDEX_LOADING
+    ? '🔄 Loading…'
+    : (MANIFEST_CACHE ? '📋 Index · ' + esc(relTime(MANIFEST_CACHE.fetchedAt)) : '📋 Tap Refresh');
+
+  const email = (CURRENT_USER && CURRENT_USER.email) || '';
+  const who = driveConnected()
+    ? `<span class="hh-user" title="${esc(email)}">${esc(email.split('@')[0] || 'connected')}</span>`
+    : `<span class="hh-warn" title="Connect Google Drive from the ☰ menu">⚠️ Drive not connected</span>`;
+
+  const left = archived
+    ? `<button class="hh-solid" id="btn-home-live" title="Back to the main subjects list">← Live</button>
+       <span class="hh-strong">🗄 Archived (${archivedCount})</span>`
+    : `<button class="hh-solid" id="btn-new-prop">+ New Subject</button>
+       <button class="hh-ghost" id="btn-home-archived" title="View archived subjects"
+         >🗄 Archived${archivedCount ? ` (${archivedCount})` : ''}</button>`;
+
+  const pullBtn = `<button class="hh-ghost" id="btn-home-pull-all" data-pull-all-btn="1"
+      ${HOME_PULL_ALL_RUNNING ? 'disabled' : ''}
+      title="Update every subject from Google Drive — downloads each one’s latest saved data (☁ cards load in)"
+      >${esc(pullAllBtnLabel())}</button>`;
+
+  const row1 = `<div class="home-hdr-row">
+      ${left}
+      <span class="hh-status" title="Shared org index of every subject">${statusText}</span>
+      <span class="hh-spacer"></span>
+      ${who}
+      ${pullBtn}
+      <button class="hh-text" id="btn-home-refresh"
+        title="Refresh the org index only (names / counts / who is editing) — does not download each subject’s data"
+        >🔄 Refresh</button>
+    </div>`;
+
+  if (!showSort) return `<div class="home-hdr">${row1}</div>`;
+
+  /* The stamp rides on row 2, not next to its button: row 1 is already at the
+     width where Refresh starts to clip, and row 2 has the free space. */
+  const stamp = (HOME_PULL_ALL_AT && !HOME_PULL_ALL_RUNNING)
+    ? `<span class="hh-stamp" title="Every subject’s data was pulled from Drive at this time"
+        >✓ Data pulled · ${esc(relTime(HOME_PULL_ALL_AT))}</span>`
+    : '';
+
+  const opts = [['modified', 'Date Modified'], ['created', 'Date Created'], ['name', 'Name']]
+    .map(([v, l]) => `<option value="${v}"${HOME_SORT_FIELD === v ? ' selected' : ''}>${l}</option>`)
+    .join('');
+
+  const row2 = `<div class="home-hdr-row">
+      ${stamp}
+      <span class="hh-dim">Sort:</span>
+      <select class="hh-select" id="home-sort-field">${opts}</select>
+      <button class="hh-light" id="btn-home-sort-dir" title="Toggle sort direction"
+        >${esc(homeSortDirLabel())}</button>
+      ${homeLegendHtml()}
+      <span class="hh-spacer"></span>
+    </div>`;
+
+  return `<div class="home-hdr">${row1}${row2}</div>`;
+}
+
+/**
+ * Collapsible legend for the card badges. Sized to its own content so it tucks
+ * into the leftover navy next to the sort controls instead of claiming a third
+ * row. Mirrors the badges set in renderHome — keep the two in sync.
+ */
+function homeLegendHtml() {
+  const row = (icon, cls, text) =>
+    `<div class="hl-row"><span class="hl-ico ${cls || ''}">${icon}</span><span>${text}</span></div>`;
+  return `<details class="home-legend" id="home-legend"${HOME_LEGEND_OPEN ? ' open' : ''}>
+    <summary>ⓘ  What do the icons mean?</summary>
+    <div class="hl-body">
+      ${row('☁', 'hl-cloud', 'On Drive but not loaded on this device — tap the card to open it, or use “⤓ Update All Subjects” to load every one at once')}
+      ${row('▦', '', `<b>N/${MAX_COMPS} comps</b> — comp slots filled, out of the ${MAX_COMPS} the COMPS tab holds`)}
+      ${row('◉', 'hl-direct', '<b>N direct</b> — comps marked <i>Direct</i>; only these drive the suggested market rents (green at 4+)')}
+      ${row('$', 'hl-ok', `<b>N/${BUCKETS.length} rents</b> — unit buckets with an effective market rent computed`)}
+      ${row('⚠', 'hl-warn', '<b>unlinked</b> — no Drive deal folder linked yet, so nothing syncs and Export has nowhere to write')}
+      ${row('⤓', 'hl-ok', '<b>updated</b> — this subject’s data was just pulled from Drive by “⤓ Update All Subjects”')}
+      ${row('☰', '', 'Menu (top right, inside a subject) — rename, link/change Drive folder, archive, delete')}
+    </div>
+  </details>`;
+}
+
 function renderHome() {
   const host = $('#home-content');
   if (!host) return;
-  const local = Object.values(STORE.properties || {});
-  const remote = (MANIFEST_CACHE && MANIFEST_CACHE.data && MANIFEST_CACHE.data.properties) || [];
-  const localIds = new Set(local.map(p => p.id));
-  const remoteOnly = remote.filter(e => !localIds.has(e.id));
 
-  local.sort((a, b) => String(b.updated || '').localeCompare(String(a.updated || '')));
+  const entries = mergedHomeEntries();
+  sortHomeEntries(entries);
+  const archivedCount = entries.filter(isEntryArchived).length;
+  const visible = entries.filter(e =>
+    HOME_VIEW_MODE === 'archived' ? isEntryArchived(e) : !isEntryArchived(e));
+  const local = visible.filter(e => e.local).map(e => e.local);
+  const remoteOnly = visible.filter(e => !e.local).map(e => e.remote);
 
   const onboard = localStorage.getItem(ONBOARDING_DISMISSED_KEY) ? '' : `
     <div class="onboard" id="onboard">
@@ -516,12 +695,7 @@ function renderHome() {
       </div>
     </div>`;
 
-  const statusLine = `<div class="home-head">
-      <span class="grow">${driveConnected()
-        ? '✅ ' + esc((CURRENT_USER && CURRENT_USER.email) || 'Drive connected')
-        : '⚠️ Google Drive not connected'}</span>
-      <button class="btn small" id="btn-home-refresh">🔄 Refresh</button>
-    </div>`;
+  const header = homeHeaderHtml(archivedCount, !!(local.length || remoteOnly.length));
 
   const cards = local.map(p => {
     const rents = (function () {
@@ -541,6 +715,7 @@ function renderHome() {
           <span class="badge ${direct >= 4 ? 'b-ok' : 'b-warn'}">${direct} direct</span>
           <span class="badge ${rents > 0 ? 'b-direct' : ''}">${rents}/${BUCKETS.length} rents</span>
           ${p.drive.folderId ? '' : '<span class="badge b-warn">unlinked</span>'}
+          ${HOME_PULL_ALL_IDS.has(p.id) ? '<span class="badge b-ok">⤓ updated</span>' : ''}
         </div>
       </div>
       <span class="muted">›</span>
@@ -561,20 +736,47 @@ function renderHome() {
       <span class="muted">›</span>
     </div>`).join('');
 
-  host.innerHTML = onboard + statusLine
-    + (cards || `<div class="muted small" style="padding:8px 2px">No subjects on this device yet.</div>`)
+  const empty = HOME_VIEW_MODE === 'archived'
+    ? 'No archived subjects. Open one and use ☰ → Archive to move it here.'
+    : 'No subjects on this device yet. Tap “+ New Subject” to start.';
+
+  host.innerHTML = onboard + header
+    + (cards || (remoteCards ? '' : `<div class="muted small" style="padding:8px 2px">${empty}</div>`))
     + (remoteCards ? `<div class="section-title">On Drive (other devices)</div>` + remoteCards : '')
-    + `<button class="fab" id="btn-new-prop">+ New Subject</button>`;
+    /* The FAB stays: on a phone the header scrolls away, and this is the only
+       add button still reachable at the bottom of a long list. Hidden in the
+       Archived view, where "new" is not what you came for. */
+    + (HOME_VIEW_MODE === 'archived' ? '' : `<button class="fab" id="btn-new-prop-fab">+ New Subject</button>`);
+
+  const lg = $('#home-legend');
+  if (lg) lg.addEventListener('toggle', () => {
+    HOME_LEGEND_OPEN = lg.open;      // survive the next re-render
+    if (!lg.open) return;
+    /* On a phone the header row scrolls sideways, and the legend is the last thing
+       on it — opened, its panel sits mostly off-screen. Pull it into view.
+       Deferred a macrotask so the revealed panel is laid out first; setTimeout not
+       rAF, which never fires in a backgrounded tab and would leave it parked off
+       to the right. `block:'nearest'` keeps the page from jumping vertically. */
+    setTimeout(() => {
+      try { lg.scrollIntoView({ inline: 'start', block: 'nearest' }); }
+      catch (e) {
+        const row = lg.parentElement;
+        if (row) row.scrollLeft = lg.offsetLeft - row.offsetLeft;
+      }
+    });
+  });
 }
 
 async function refreshHomeIndex() {
   if (HOME_INDEX_LOADING || !driveConnected()) return;
+  const onHome = () => $('#home-content') && !$('#home-content').classList.contains('hidden');
   HOME_INDEX_LOADING = true;
+  if (onHome()) renderHome();          // paint "🔄 Loading…" in the header status slot
   try {
     await fetchManifest(true);
-    if ($('#home-content') && !$('#home-content').classList.contains('hidden')) renderHome();
   } finally {
     HOME_INDEX_LOADING = false;
+    if (onHome()) renderHome();
   }
 }
 
