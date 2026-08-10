@@ -223,9 +223,15 @@
    shrinks at this width.
    ========================================================================= */
 @media (min-width: 900px) {
+  /* The CARDS get the fixed track and the MAP takes the remainder, which is the
+     opposite of the obvious arrangement and deliberate. A comp card holds four
+     short lines of text; stretched to 806px (1fr of a 1320px page) it was mostly
+     empty, and the line lengths grew with the window for no benefit. Pinning the
+     list to a readable column instead means the map — the one element that gets
+     genuinely more useful with area — absorbs every extra pixel. */
   .p2-split {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 420px;
+    grid-template-columns: minmax(280px, 520px) minmax(0, 1fr);
     gap: 10px;
     align-items: start;
   }
@@ -249,9 +255,8 @@
   .map-ph { padding: 22px 14px; }
 }
 
-/* Room for a wider map without starving the 12-column unit table, which is
-   itself only fully comfortable past this width — the same breakpoint where
-   styles.css takes the attribute trio from two pairs across to three. */
+/* A little more room for the list once the window can spare it, still capped —
+   past ~560px the cards go back to being mostly whitespace. */
 @media (min-width: 1200px) {
-  .p2-split { grid-template-columns: minmax(0, 1fr) 480px; }
+  .p2-split { grid-template-columns: minmax(280px, 560px) minmax(0, 1fr); }
 }
