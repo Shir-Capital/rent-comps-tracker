@@ -745,7 +745,15 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   /* A 12-column grid so fields sit next to each other, sized by what the value
      actually needs rather than by source order: a year is four characters and
      has no business occupying the same width as a street address. */
-  .comp-card > .card-body,
+  /* ⚠️ Scoped to #comp-editor, NOT .comp-card — and that is a bug fix, not a
+     tidy-up. The tab-2 LIST cards also carry .comp-card, so `.comp-card >
+     .card-body` put their address/stat lines into this 12-column grid as well.
+     None of them is a .field, so each was auto-placed into ONE 57.8px track: a
+     560px card rendered its content 58px wide, and a single line of stats came
+     out 85px tall. Measured on the live host — card 133px where 108px was the
+     honest height. The editor is the only card whose body holds fields, so the
+     grid belongs to it by id. */
+  #comp-editor > .card-body,
   [data-cardkey^="more:"] > .card-body {
     display: grid;
     grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -758,9 +766,20 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
      the row has cells, and the pair gets squeezed into a 52px column until the
      inputs look empty. The unit table needs this most — half its columns are
      row-tagged pairs (Beds+Baths, SF+# Units, Ask+Occ). */
-  .comp-card > .card-body > .field-row,
+  #comp-editor > .card-body > .field-row,
   [data-cardkey^="more:"] > .card-body > .field-row,
   .urow-body > .field-row { display: contents; }
+
+  /* ---------------------------------------- 2. COMPS LIST (the tab-2 cards) */
+  /* A different thing from the editor above: four short lines of already-computed
+     text, not a form. It gets block flow and tighter leading, so eight comps are
+     a list you can scan beside the map instead of eight 133px blocks. The card
+     is ~560px here (see map.css), which every line clears with room to spare. */
+  .comp-card[data-compcard] > .card-head { padding: 4px 9px; }
+  .comp-card[data-compcard] > .card-body { padding: 5px 9px 6px; }
+  .comp-card[data-compcard] { margin-bottom: 6px; }
+  .comp-card[data-compcard] .comp-meta { font-size: 12.5px; line-height: 1.28; margin-top: 1px; }
+  .comp-card[data-compcard] .comp-stat { font-size: 13.5px; line-height: 1.28; }
 
   .comp-card .field,
   [data-cardkey^="more:"] .field { margin-bottom: 0; grid-column: span 2; }
