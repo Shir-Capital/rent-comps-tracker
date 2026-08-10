@@ -950,9 +950,15 @@ function renderPhase2() {
   const cards = comps.map((c, i) => {
     const st = compStats(c);
     const cap = bucketCapacityIssues(c);
+    /* The pin chip is the card's half of the map link: present means this comp
+       is on the KML and clicking it centres the map there; absent means it is
+       one of the ones the drift banner is complaining about. map.js may not
+       have painted yet on the first frame, hence the typeof guard. */
+    const pinned = typeof compHasPin === 'function' && compHasPin(c.compId);
     return `<div class="card comp-card${c.category ? ' cat-' + esc(c.category) : ''}" data-compcard="${esc(c.compId)}">
       <div class="card-head" data-openomp="${esc(c.compId)}">
         <span class="grow">${i + 1}. ${esc(c.name || '(unnamed comp)')}</span>
+        ${pinned ? `<button type="button" class="pin-chip" data-mapjump="${esc(c.compId)}" title="Centre the map on this comp">📍</button>` : ''}
         <span class="cat-pill ${c.category ? esc(c.category) : 'none'}">${c.category ? esc(categoryMeta(c.category).label) : 'set type'}</span>
       </div>
       <div class="card-body" data-openomp="${esc(c.compId)}" style="cursor:pointer">
@@ -975,7 +981,13 @@ function renderPhase2() {
     </div>`;
   }).join('');
 
+  /* Two columns at desktop width, stacked on a phone — see map.css. The map
+     panel is filled by map.js, which owns everything about it: this file only
+     provides the slot, so deleting map.js/map.css leaves an empty <aside> and
+     a working comps list. */
   host.innerHTML = `
+    <div class="p2-split">
+    <div class="p2-cards">
     <div class="card">
       <div class="card-body">
         <div style="display:flex;gap:5px;flex-wrap:wrap">${counts}
@@ -991,7 +1003,12 @@ function renderPhase2() {
         ${full ? '<div class="tiny muted" style="margin-top:5px">The COMPS tab holds 8 comps — delete one to add another.</div>' : ''}
       </div>
     </div>
-    ${cards || '<div class="muted small" style="padding:8px 2px">No comps yet. Add one, or pull candidates from HelloData.</div>'}`;
+    ${cards || '<div class="muted small" style="padding:8px 2px">No comps yet. Add one, or pull candidates from HelloData.</div>'}
+    </div>
+    <aside class="p2-map" id="p2-map-panel"></aside>
+    </div>`;
+
+  if (typeof mountCompMapPanel === 'function') mountCompMapPanel($('#p2-map-panel', host));
 
   const add = $('#btn-add-comp');
   if (add) add.onclick = () => {
