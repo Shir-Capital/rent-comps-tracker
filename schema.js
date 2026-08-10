@@ -3,9 +3,9 @@
 // Rebuild: python Accessories/build_schema.py
 window.SCHEMA = {
   "compsTab": {
-    "_versionNote": "Bumped v7 -> v8 on 2026-08-08. The COMPS GEOMETRY is identical in v7 and v8 — every row, column, offset and section below is unchanged, and the schema verifies 67/67 against both. What changed in v8 is only what the FEES label cells CONTAIN (they became dropdowns, and five of the eight v7 labels were dropped), which is why fees are routed by `compsLabel` and never by row. `populatorScript` moved to v36 in the same pass: v35 and earlier build their fee map positionally and silently mislabel fees on a v8 workbook, and this string is the command the Export tab tells the analyst to run.",
+    "_versionNote": "Bumped v7 -> v8 on 2026-08-08. The COMPS GEOMETRY is identical in v7 and v8 — every row, column, offset and section below is unchanged, and the schema verifies 67/67 against both. What changed in v8 is only what the FEES label cells CONTAIN (they became dropdowns, and five of the eight v7 labels were dropped), which is why fees are routed by `compsLabel` and never by row. `populatorScript` moved to v36 in the same pass: v35 and earlier build their fee map positionally and silently mislabel fees on a v8 workbook, and this string is the command the Export tab tells the analyst to run. Moved again to v37 on 2026-08-10, and that floor is data-bearing rather than cosmetic: export.js emits a `subject_market_rents_by_plan` block and resolves subject column G BY PLAN LABEL, and only v37 consumes it. v36 runs to completion without error on the same payload and silently falls back to bucket-level figures for column G — the per-plan market rents are simply lost, with nothing in the output to say so. Which is the reason this string has to lead the populator and never trail it: a stale hint here is not a wrong version number, it is a silent data loss the analyst cannot see.",
     "templateVersion": "SHIR_MF_Template_v8",
-    "populatorScript": "rent-comp-data-populator-populate_comps-v36.py",
+    "populatorScript": "rent-comp-data-populator-populate_comps-v37.py",
     "compBaseCols": [
       25,
       34,
