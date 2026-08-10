@@ -72,6 +72,40 @@ const LEAFLET_JS  = 'https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js'
 /** How long a cached parse is trusted before we re-check Drive's modifiedTime. */
 const MAP_REVALIDATE_MS = 10 * 60 * 1000;
 
+/* ------------------------------------------------------------------ basemaps
+   Street vs aerial, because they answer different questions: the street map
+   tells you where a comp sits on the grid, the imagery tells you what it IS —
+   garden walk-ups vs a mid-rise, surface parking vs structured, how much tree
+   cover, what backs onto it. For a rent comp that is half the read.
+
+   Esri World Imagery, not Google: no API key, so nothing to leak from a public
+   repo (same reason as Leaflet over the Maps JS API). ⚠️ Its URL template is
+   `{z}/{y}/{x}` — Y BEFORE X, the opposite of the XYZ convention OSM uses.
+   Swap them and every tile 404s or, worse, silently serves the wrong place.
+
+   `labels` rides ON TOP of the imagery: bare aerial has no street names, which
+   makes it much harder to place a comp. Added second so it stacks above.
+
+   If Esri ever has to go, the drop-in replacement is USGS —
+   https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}
+   — public domain and verified serving, but US-only and lower max zoom. */
+const MAP_BASEMAP_KEY = 'rent_comps_map_basemap_v1';
+const BASEMAPS = {
+  map: {
+    label: 'Map',
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 19,
+  },
+  satellite: {
+    label: 'Satellite',
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Imagery &copy; <a href="https://www.esri.com/">Esri</a>, Maxar, Earthstar Geographics',
+    maxZoom: 19,
+    labels: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  },
+};
+
 // --------------------------------------------------------------------- state
 /* MAP_EL is created once and MOVED between renders rather than rebuilt.
    renderPhase2() replaces #phase-content.innerHTML wholesale on every comp
@@ -82,6 +116,9 @@ const MAP_REVALIDATE_MS = 10 * 60 * 1000;
 let MAP_EL       = null;   // the <div> Leaflet owns
 let MAP_OBJ      = null;   // the L.Map
 let MAP_PINLAYER = null;   // L.LayerGroup holding every marker
+let MAP_BASE     = null;   // the active basemap tile layer
+let MAP_LABELS   = null;   // the street-label overlay, satellite only
+let MAP_BASECTL  = null;   // the Map/Satellite toggle control
 let MAP_PROP_ID  = '';     // which property MAP_OBJ is currently showing
 let MAP_PINS     = [];     // [{ point, comp, index, marker }]
 let MAP_BUSY     = false;  // a Drive read is in flight
@@ -234,6 +271,18 @@ function setMapCollapsed(v) {
   else localStorage.removeItem(MAP_COLLAPSED_KEY);
 }
 
+/* Basemap choice is per DEVICE, not per deal: it is a preference about how you
+   read a map, not a fact about the property. Street is the default because it is
+   the cheaper read; whoever prefers imagery sets it once. */
+function mapBasemap() {
+  const k = localStorage.getItem(MAP_BASEMAP_KEY);
+  return BASEMAPS[k] ? k : 'map';
+}
+function setMapBasemap(k) {
+  if (BASEMAPS[k] && k !== 'map') localStorage.setItem(MAP_BASEMAP_KEY, k);
+  else localStorage.removeItem(MAP_BASEMAP_KEY);
+}
+
 // ============================================================== Drive lookup
 /**
  * Locate the deal's comp-map KML. Returns one of:
@@ -342,6 +391,76 @@ function loadLeaflet() {
     document.head.appendChild(js);
   });
   return LEAFLET_LOAD;
+}
+
+// ================================================================= basemaps
+/**
+ * Swap the basemap, remembering the choice. Removes the outgoing layers rather
+ * than stacking new ones on top — toggling back and forth all afternoon must
+ * leave exactly one basemap (plus the label overlay on satellite) on the map,
+ * not a pile of them quietly costing tile requests.
+ */
+function applyBasemap(key) {
+  const L = window.L;
+  if (!L || !MAP_OBJ) return;
+  const b = BASEMAPS[key] ? key : 'map';
+  const cfg = BASEMAPS[b];
+
+  if (MAP_BASE)   { MAP_OBJ.removeLayer(MAP_BASE);   MAP_BASE = null; }
+  if (MAP_LABELS) { MAP_OBJ.removeLayer(MAP_LABELS); MAP_LABELS = null; }
+
+  MAP_BASE = L.tileLayer(cfg.url, {
+    maxZoom: cfg.maxZoom,
+    attribution: cfg.attribution,
+  }).addTo(MAP_OBJ);
+  /* Both basemap and labels live in Leaflet's tilePane, so within that pane the
+     order is add-order. Imagery to the back, labels on top of it. (The pins are
+     in markerPane at z-index 600 and are never at risk from either.) */
+  MAP_BASE.bringToBack();
+  if (cfg.labels) {
+    MAP_LABELS = L.tileLayer(cfg.labels, { maxZoom: cfg.maxZoom }).addTo(MAP_OBJ);
+  }
+
+  setMapBasemap(b);
+  syncBasemapButtons(b);
+}
+
+function syncBasemapButtons(key) {
+  $$('[data-basemap]').forEach(btn => {
+    btn.classList.toggle('on', btn.getAttribute('data-basemap') === key);
+  });
+}
+
+/** The Map / Satellite toggle, inside the map window at its top-right. */
+function addBasemapControl() {
+  const L = window.L;
+  if (!L || !MAP_OBJ || MAP_BASECTL) return;
+  const current = mapBasemap();
+  const Ctl = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd: function () {
+      const d = L.DomUtil.create('div', 'map-basemap');
+      d.innerHTML = Object.keys(BASEMAPS).map(k =>
+        '<button type="button" data-basemap="' + esc(k) + '"'
+        + (k === current ? ' class="on"' : '')
+        + ' title="' + esc(k === 'satellite'
+            ? 'Aerial imagery — read the built form: walk-ups vs mid-rise, parking, tree cover'
+            : 'Street map') + '">'
+        + esc(BASEMAPS[k].label) + '</button>').join('');
+      /* Without this a tap on the toggle also reaches the map underneath and
+         pans or double-click-zooms it. Leaflet's own helper, because it knows
+         every event it needs to swallow. */
+      L.DomEvent.disableClickPropagation(d);
+      L.DomEvent.disableScrollPropagation(d);
+      d.addEventListener('click', (ev) => {
+        const b = ev.target.closest('[data-basemap]');
+        if (b) applyBasemap(b.getAttribute('data-basemap'));
+      });
+      return d;
+    },
+  });
+  MAP_BASECTL = new Ctl();
+  MAP_BASECTL.addTo(MAP_OBJ);
 }
 
 // ================================================== pin <-> comp cross-match
@@ -461,11 +580,9 @@ function paintCompMapPins(rec) {
 
   if (!MAP_OBJ) {
     MAP_OBJ = L.map(host, { zoomControl: true, attributionControl: true });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-    }).addTo(MAP_OBJ);
     MAP_PINLAYER = L.layerGroup().addTo(MAP_OBJ);
+    applyBasemap(mapBasemap());   // whichever basemap this device last chose
+    addBasemapControl();
   }
   MAP_PINLAYER.clearLayers();
 
