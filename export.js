@@ -226,8 +226,8 @@ function buildPopulatorPayload() {
     /* Geometry stamp — v7 keeps the 9-col stride from Y but moved the attribute
        band up to 79-87 and shrank every unit section to 9 rows. A v30-or-earlier
        populator hardcodes the v3 rows and writes amenities into the photo band. */
-    template_version: TAB.templateVersion || 'SHIR_MF_Template_v7',
-    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v35.py',
+    template_version: TAB.templateVersion || 'SHIR_MF_Template_v8',
+    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v36.py',
     generated_at: nowISO(),
     generated_by: (CURRENT_USER && CURRENT_USER.email) || '',
     property_url: APP_BASE_URL + propertyHash(STATE).replace(/^#/, '#'),
@@ -568,7 +568,7 @@ async function buildCompsWorkbook() {
   {
     const ws = wb.addWorksheet('COMPS Cell Map');
     const heads = ['Cell', 'Row', 'Col', 'Belongs To', 'Field', 'Value'];
-    titleRow(ws, `COMPS TAB CELL MAP — what ${TAB.populatorScript || 'populate_comps'} writes — ${TAB.templateVersion || 'SHIR_MF_Template_v7'}`, heads.length);
+    titleRow(ws, `COMPS TAB CELL MAP — what ${TAB.populatorScript || 'populate_comps'} writes — ${TAB.templateVersion || 'SHIR_MF_Template_v8'}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
@@ -812,14 +812,19 @@ function renderPhase4() {
       <div class="card-head"><span class="grow">Then, on a machine with the proforma</span></div>
       <div class="card-body">
         <div class="muted small">Run the proven populator against the deal's proforma:</div>
-        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v35.py')}" ^
+        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v36.py')}" ^
   "&lt;proforma_in.xlsx&gt;" "&lt;proforma_out.xlsx&gt;" "${esc(exportFileBase())}.json" --skip-fetch</pre>
         <div class="tiny muted" style="margin-top:6px">
           Then reconcile the populated COMPS tab against the <b>COMPS Cell Map</b> sheet.<br/>
-          ⚠ This payload targets <b>${esc(TAB.templateVersion || 'SHIR_MF_Template_v7')}</b> geometry:
+          ⚠ This payload targets <b>${esc(TAB.templateVersion || 'SHIR_MF_Template_v8')}</b> geometry:
           attribute + fee band at rows ${esc(TAB.attrRowFirst)}–${esc(TAB.attrRowLast)}, nine rows per unit section,
           row 4 = year · units · distance · vacancy · concession.
-          v35 resolves those rows by label so it also handles v4/v5/v6, but
+          The COMPS geometry is <b>identical in v7 and v8</b> — v8 changed only what the
+          FEES label cells contain — so this payload suits either.<br/>
+          <b>Use v36 or newer.</b> v35 and earlier map fees by ROW: on a v8 workbook they
+          write Insurance into the Cable/Internet row and Pest into Cleaning, silently,
+          and the fee column is summed into every unit's Eff. $/Mo.
+          v35 still resolves the other bands by label (so it handles v4/v5/v6/v7), but
           <b>v30 and earlier hardcode the v3 rows</b> and will write amenities into the photo band.
           For a v2 / v36-lineage workbook (7-col stride from W) use populate_comps-<b>v29</b>.
         </div>

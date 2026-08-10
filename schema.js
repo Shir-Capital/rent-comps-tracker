@@ -3,8 +3,9 @@
 // Rebuild: python Accessories/build_schema.py
 window.SCHEMA = {
   "compsTab": {
-    "templateVersion": "SHIR_MF_Template_v7",
-    "populatorScript": "rent-comp-data-populator-populate_comps-v35.py",
+    "_versionNote": "Bumped v7 -> v8 on 2026-08-08. The COMPS GEOMETRY is identical in v7 and v8 — every row, column, offset and section below is unchanged, and the schema verifies 67/67 against both. What changed in v8 is only what the FEES label cells CONTAIN (they became dropdowns, and five of the eight v7 labels were dropped), which is why fees are routed by `compsLabel` and never by row. `populatorScript` moved to v36 in the same pass: v35 and earlier build their fee map positionally and silently mislabel fees on a v8 workbook, and this string is the command the Export tab tells the analyst to run.",
+    "templateVersion": "SHIR_MF_Template_v8",
+    "populatorScript": "rent-comp-data-populator-populate_comps-v36.py",
     "compBaseCols": [
       25,
       34,
