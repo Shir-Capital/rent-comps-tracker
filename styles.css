@@ -449,15 +449,95 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
 .chk .ico { flex: 0 0 auto; }
 
 /* --------------------------------------------------------------- home */
-.home-head {
+/* Home header box — the navy bar above the subject list. Mirrors Capex Builder's
+   so the two applets read as one family; see homeHeaderHtml() in ui.js.
+   ALWAYS exactly two rows: nothing wraps to a third line. A narrow phone scrolls
+   a row sideways instead, and the scrollbar is hidden so the navy stays clean
+   (the row still scrolls by touch / trackpad / shift-wheel). */
+.home-hdr {
+  margin: 2px 0 12px;
+  background: var(--navy);
+  border: 1px solid var(--navy);
+  border-radius: 8px;
+  padding: 9px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #cbd5e1;
+}
+.home-hdr-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: var(--muted);
-  margin-bottom: 8px;
+  gap: 10px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
-.home-head .grow { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.home-hdr-row::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+.home-hdr .hh-spacer { flex: 1 1 auto; min-width: 8px; }
+.home-hdr .hh-status { color: #e2e8f0; white-space: nowrap; }
+.home-hdr .hh-strong { color: #fff; font-weight: 700; white-space: nowrap; }
+.home-hdr .hh-dim    { color: #94a3b8; white-space: nowrap; }
+.home-hdr .hh-user   { color: #94a3b8; white-space: nowrap; }
+.home-hdr .hh-warn   { color: #fcd34d; font-weight: 600; white-space: nowrap; }
+.home-hdr .hh-stamp  { color: #86efac; font-weight: 600; white-space: nowrap; }
+
+/* Three button weights, loudest first: the primary action is a solid white pill,
+   secondary actions are outlined ghosts on the navy, and Refresh is plain text. */
+.home-hdr button { font: inherit; cursor: pointer; white-space: nowrap; }
+.home-hdr .hh-solid {
+  background: #fff; color: var(--navy);
+  border: none; border-radius: 6px;
+  padding: 6px 12px; font-size: 13.5px; font-weight: 700;
+}
+.home-hdr .hh-ghost {
+  background: rgba(255, 255, 255, 0.14); color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.55); border-radius: 6px;
+  padding: 5px 11px; font-weight: 600;
+}
+.home-hdr .hh-ghost:disabled { opacity: .7; cursor: default; }
+.home-hdr .hh-text {
+  background: none; border: none; color: #fff; font-weight: 600; padding: 0;
+}
+/* Row 2's sort controls sit on white so they read as inputs, not as chrome. */
+.home-hdr .hh-select,
+.home-hdr .hh-light {
+  background: #fff; color: var(--navy);
+  border: 1px solid var(--line); border-radius: 5px;
+  padding: 3px 7px; font-size: 12.5px; font-weight: 600;
+}
+.home-hdr .hh-select { font-weight: 400; }
+
+/* Sized to its own content — a compact pill tucked into the leftover navy next to
+   the sort controls, rather than a third row of its own. */
+.home-legend {
+  flex: 0 0 auto; align-self: center; max-width: 100%;
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 6px; overflow: hidden; color: var(--ink);
+}
+.home-legend > summary {
+  padding: 3px 10px; cursor: pointer;
+  font-size: 12.5px; font-weight: 600; color: #475569;
+  user-select: none; white-space: nowrap;
+}
+.home-legend .hl-body {
+  padding: 2px 12px 9px;
+  font-size: 12.5px; color: #475569;
+  width: min(600px, 74vw);
+}
+.home-legend .hl-row {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 3px 0; line-height: 1.35;
+}
+.home-legend .hl-ico { flex: 0 0 18px; text-align: center; font-weight: 700; }
+.home-legend .hl-cloud  { color: #1e3a8a; }
+.home-legend .hl-direct { color: var(--direct); }
+.home-legend .hl-ok     { color: var(--ok); }
+.home-legend .hl-warn   { color: var(--warn); }
+
 .prop-card {
   display: flex;
   align-items: center;
