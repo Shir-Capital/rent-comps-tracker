@@ -269,7 +269,12 @@ function buildPopulatorPayload() {
        band up to 79-87 and shrank every unit section to 9 rows. A v30-or-earlier
        populator hardcodes the v3 rows and writes amenities into the photo band. */
     template_version: TAB.templateVersion || 'SHIR_MF_Template_v8',
-    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v36.py',
+    /* Keep this fallback at the CURRENT floor, not the historical one. It fires only
+       when schema.js failed to load, and a stale value here is the one failure the
+       analyst cannot see: v36 consumes this payload without error and silently
+       substitutes bucket averages for the per-plan `subject_market_rents_by_plan`
+       rents below. Bump it in lockstep with comps_schema.json. */
+    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v37.py',
     generated_at: nowISO(),
     generated_by: (CURRENT_USER && CURRENT_USER.email) || '',
     property_url: APP_BASE_URL + propertyHash(STATE).replace(/^#/, '#'),
@@ -895,7 +900,7 @@ function renderPhase4() {
       <div class="card-head"><span class="grow">Then, on a machine with the proforma</span></div>
       <div class="card-body">
         <div class="muted small">Run the proven populator against the deal's proforma:</div>
-        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v36.py')}" ^
+        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v37.py')}" ^
   "&lt;proforma_in.xlsx&gt;" "&lt;proforma_out.xlsx&gt;" "${esc(exportFileBase())}.json" --skip-fetch</pre>
         <div class="tiny muted" style="margin-top:6px">
           Then reconcile the populated COMPS tab against the <b>COMPS Cell Map</b> sheet.<br/>
@@ -904,8 +909,13 @@ function renderPhase4() {
           row 4 = year · units · distance · vacancy · concession.
           The COMPS geometry is <b>identical in v7 and v8</b> — v8 changed only what the
           FEES label cells contain — so this payload suits either.<br/>
-          <b>Use v36 or newer.</b> v35 and earlier map fees by ROW: on a v8 workbook they
-          write Insurance into the Cable/Internet row and Pest into Cleaning, silently,
+          <b>Use v37.</b> Every older populator loses something <i>silently</i> — none of
+          them error, so the only symptom is a wrong number nobody questions.
+          <b>v36</b> ignores this payload's per-plan market rents and falls back to the
+          bucket average for subject column G, collapsing distinct per-plan rents into
+          one figure.
+          <b>v35 and earlier</b> additionally map fees by ROW: on a v8 workbook they
+          write Insurance into the Cable/Internet row and Pest into Cleaning,
           and the fee column is summed into every unit's Eff. $/Mo.
           v35 still resolves the other bands by label (so it handles v4/v5/v6/v7), but
           <b>v30 and earlier hardcode the v3 rows</b> and will write amenities into the photo band.
