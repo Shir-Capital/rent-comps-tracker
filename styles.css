@@ -449,6 +449,19 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
 .chk .ico { flex: 0 0 auto; }
 
 /* --------------------------------------------------------------- home */
+/* The home page is a LIST, not a workspace, so it matches Capex Builder's column
+   (720px outer / 688px content) instead of inheriting the 1320px that `main` gets
+   at desktop width — which tab 2 genuinely needs for a 12-column unit table beside
+   three attribute cards, and which stretched a dozen property cards across an acre
+   of white. The horizontal padding is bumped to 16px in the ≥900px block below so
+   the content box lands on Capex's 688px exactly.
+
+   Scoped to `#home-content` BY ID on purpose: an id (specificity 100) beats the
+   two `main` rules (specificity 1) in both the base and the media query without
+   depending on source order, so it cannot be silently undone by a later `main`
+   tweak. `#phase-content` is deliberately untouched. */
+#home-content { max-width: 720px; }
+
 /* Home header box — the navy bar above the subject list. Mirrors Capex Builder's
    so the two applets read as one family; see homeHeaderHtml() in ui.js.
    ALWAYS exactly two rows: nothing wraps to a third line. A narrow phone scrolls
@@ -696,6 +709,14 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   .card > .card-head[title] .grow::after {
     content: " \24d8"; font-size: 11px; font-weight: 400; opacity: .55;
   }
+
+  /* 16px gutters here (not the 12px `main` uses) so the 720px column encloses a
+     688px content box — byte-for-byte the same measurement Capex Builder's home
+     header row was laid out against. Vertical padding stays on this app's desktop
+     rhythm; only the width was asked to match. Phones keep `main`'s 10px gutters:
+     at 375px the property-card name is already down to ~99px, so spending another
+     12px on whitespace there would cost real characters. */
+  #home-content { padding-left: 16px; padding-right: 16px; }
 
   /* ------------------------------------------------- home: one card, one line */
   /* Name · folder/edited · badges all on one row. Stacked they made every deal
