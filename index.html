@@ -19,6 +19,8 @@
 <link rel="stylesheet" href="screener.css" />
 <!-- Tab 2's comp map, ditto: map.js + map.css are the whole feature. -->
 <link rel="stylesheet" href="map.css" />
+<!-- The comp editor's photo drop zones, ditto: photos.js + photos.css. -->
+<link rel="stylesheet" href="photos.css" />
 </head>
 <body>
 <header class="app-header">
@@ -99,6 +101,9 @@
 <!-- Tab 4's paste-ready COMPS mirror. Must load after export.js: it wraps
      window.renderPhase4 the same way screener.js wraps renderPhase3. -->
 <script src="paste-export.js"></script>
+<!-- The comp editor's photo drop zones. Must load after ui.js: it wraps
+     window.renderCompEditor, and photos go to the deal folder via drive.js. -->
+<script src="photos.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
