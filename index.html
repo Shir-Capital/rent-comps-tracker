@@ -96,6 +96,9 @@
 <!-- Tab 2's comp map. renderPhase2() calls into it at runtime only, so it just
      has to be in before boot. Leaflet itself is fetched lazily by map.js. -->
 <script src="map.js"></script>
+<!-- Tab 4's paste-ready COMPS mirror. Must load after export.js: it wraps
+     window.renderPhase4 the same way screener.js wraps renderPhase3. -->
+<script src="paste-export.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -4,7 +4,8 @@
 window.SCHEMA = {
   "compsTab": {
     "_versionNote": "Bumped v7 -> v8 on 2026-08-08. The COMPS GEOMETRY is identical in v7 and v8 — every row, column, offset and section below is unchanged, and the schema verifies 67/67 against both. What changed in v8 is only what the FEES label cells CONTAIN (they became dropdowns, and five of the eight v7 labels were dropped), which is why fees are routed by `compsLabel` and never by row. `populatorScript` moved to v36 in the same pass: v35 and earlier build their fee map positionally and silently mislabel fees on a v8 workbook, and this string is the command the Export tab tells the analyst to run. Moved again to v37 on 2026-08-10, and that floor is data-bearing rather than cosmetic: export.js emits a `subject_market_rents_by_plan` block and resolves subject column G BY PLAN LABEL, and only v37 consumes it. v36 runs to completion without error on the same payload and silently falls back to bucket-level figures for column G — the per-plan market rents are simply lost, with nothing in the output to say so. Which is the reason this string has to lead the populator and never trail it: a stale hint here is not a wrong version number, it is a silent data loss the analyst cannot see.",
-    "templateVersion": "SHIR_MF_Template_v8",
+    "_v9Note": "Bumped v8 -> v9 on 2026-08-10, and this one really is only a stamp. SHIR_MF_Template_v9's entire delta is 274 cells inside COMPS!R3:W76 — a lease-recency window on the INTERNAL comps block (new T4 move-in-after / W4 lookback controls). The comp grid was re-read out of the shipped v9 file for the paste export and is byte-for-byte the v7/v8 geometry: all TEN slots verified identical at row 5 and at row-4 number formats, unit sections still 9 rows, attribute + fee band still 79-87. Nothing downstream changes; populate_comps does not read this string at all, and the app's own geometry asserts pass unchanged.",
+    "templateVersion": "SHIR_MF_Template_v9",
     "populatorScript": "rent-comp-data-populator-populate_comps-v37.py",
     "compBaseCols": [
       25,
@@ -73,6 +74,116 @@ window.SCHEMA = {
       "feeLabel": 6,
       "feeValue": 7
     }
+  },
+  "_pasteMapNote": "The paste-ready export (paste-export.js) mirrors the COMPS tab positionally and is pasted back with Paste Special -> Values -> [x] Skip blanks, so a cell we leave EMPTY is a cell the paste cannot touch. This block is the list of cells it is allowed to fill; everything else on the tab is a formula, a template-owned serial, or a subtotal. Read out of SHIR_MF_Template_v9.xlsx on 2026-08-10, all ten slots verified. Three facts this depends on: (1) COMPS row 2 is a LIVE column-index chain (A2=1, B2=A2+1, ...) so nothing may ever anchor above row 3; (2) rows 3-87 hold exactly two merged ranges, J3:P3 and R3:S3, and Y3:DJ87 has NONE, which is what lets the whole comp grid go across as one rectangle; (3) unit-row offsets 1-4 are contiguous inputs while 0 (line serial) and 5-7 (Ask $/SF, Eff. $/Mo, Eff. $/SF) are not. Offsets are named, never numbered, so a template that moves one is caught by build_schema.py rather than by a wrong number in a model.",
+  "pasteMap": {
+    "sheetName": "COMPS_PASTE",
+    "dashSheetName": "DASH_PASTE",
+    "minRow": 3,
+    "regions": [
+      {
+        "key": "comps",
+        "name": "PASTE_COMPS",
+        "sheet": "COMPS_PASTE",
+        "range": "$Y$3:$DJ$87",
+        "anchor": "Y3",
+        "default": true,
+        "label": "All 8 comps — names, row 4, unit rows, type/source, attributes, fees"
+      },
+      {
+        "key": "subject",
+        "name": "PASTE_SUBJECT",
+        "sheet": "COMPS_PASTE",
+        "range": "$B$3:$H$87",
+        "anchor": "B3",
+        "default": true,
+        "label": "Subject — W/D, utilities, and per-plan market rents in column G"
+      },
+      {
+        "key": "dash",
+        "name": "PASTE_DASH",
+        "sheet": "DASH_PASTE",
+        "range": "$E$5:$E$9",
+        "anchor": "E5",
+        "default": false,
+        "label": "DASH — name, street, city/ST/zip, market, year built"
+      }
+    ],
+    "compWritable": {
+      "header": [
+        "compNum",
+        "compName",
+        "compAddress"
+      ],
+      "details": [
+        "yearBuilt",
+        "distanceMiles",
+        "vacancyPct",
+        "concessionDollars",
+        "wdType",
+        "utilStructure"
+      ],
+      "unit": [
+        "unitCount",
+        "unitSf",
+        "unitOccPct",
+        "unitAskRent"
+      ],
+      "compType": [
+        "compTypeValue",
+        "compSourceValue"
+      ],
+      "attr": [
+        "physicalValue",
+        "amenityValue",
+        "feeLabel",
+        "feeValue"
+      ]
+    },
+    "subjectWritable": {
+      "detailsCols": [
+        5,
+        7,
+        8
+      ],
+      "unitCols": [
+        7
+      ]
+    },
+    "_neverWriteNote": "Asserted in build_schema.py against compsTab.offsets rather than restated as numbers: row 4 offsets totalUnits (=Z76) and concessionPct are formulas; unit-row offsets unitRowNum, unitAskPsf, unitEffRent and unitEffPsf are the template's serial and its three derived columns; every offset of every subtotal row and of rowTotals is a formula. Subject side, only E4/G4/H4 and G6:G75 are inputs — B is an array formula and C/D/F/H are formulas.",
+    "dashCells": [
+      {
+        "row": 5,
+        "col": 5,
+        "field": "name",
+        "label": "Property name"
+      },
+      {
+        "row": 6,
+        "col": 5,
+        "field": "street",
+        "label": "Street address"
+      },
+      {
+        "row": 7,
+        "col": 5,
+        "field": "citystzip",
+        "label": "City, ST Zip"
+      },
+      {
+        "row": 8,
+        "col": 5,
+        "field": "msa",
+        "label": "Market"
+      },
+      {
+        "row": 9,
+        "col": 5,
+        "field": "year_built",
+        "label": "Year built"
+      }
+    ],
+    "_dashNote": "DASH!E5:E9 are typed constants in v9. E10 (units) is =IF(OR(RR!E365=\"\",RR!E365=0),1,RR!E365) and E18 (occupancy) is =RR!J355 — both formulas, both inside no paste range, and both additionally protected by skip-blanks. Basics!C3:D11 mirrors all of this off DASH, so DASH is the only place to write."
   },
   "unitBuckets": [
     {
