@@ -213,12 +213,54 @@ function compUnitMixForJson(comp) {
 }
 
 /**
+ * Per-PLAN subject market rents, keyed by the plan name COMPS column B carries.
+ *
+ * The Screener captures a market rent on every subject unit-mix row, and keeps
+ * the rows of one plan in step (COMPS holds one subject row per plan, not per
+ * plan+finish). This collapses them back to one entry per plan, and emits CAPTURED
+ * values only — a plan nobody priced is absent, not filled with a section average.
+ *
+ * ⚠️ Keyed by LABEL, never by position. The tracker holds one row per plan+finish
+ * — Lantern's 2x2 is 18 rows — while COMPS holds one per plan (9 slots), so the
+ * k-th tracker row is not COMPS row `startRow + k`. Writing positionally moved
+ * A1-DP's $799 to $909 and flattened a $151 spread across six 1x1 plans to a
+ * single number on a real deal.
+ */
+function subjectMarketRentsByPlan() {
+  const out = {};
+  BUCKETS.forEach(b => {
+    const grouped = groupByBucket(STATE ? STATE.subjectUnitMix : [])[b.key] || [];
+    grouped.forEach(r => {
+      const plan = (r.plan || '').trim();
+      if (!plan || out[plan]) return;
+      /* CAPTURED values only. A plan nobody priced is deliberately absent rather
+         than filled with the bucket average: the destination cell usually already
+         holds the analyst's own per-plan number, and overwriting $799 with a $909
+         section average is worse than writing nothing. The bucket figure still
+         travels in `market_rents`, and the populator applies it ONLY where column G
+         is empty — it is the only party that can see the destination. */
+      const own = numOrNull(r.market_rent);
+      if (own == null || own <= 0) return;
+      out[plan] = {
+        plan: plan,
+        bucket: b.key,
+        comps_label: b.compsLabel,
+        market_rent: own,
+        source: r.market_rent_src === 'user' ? 'screener' : 'proforma-seed',
+      };
+    });
+  });
+  return out;
+}
+
+/**
  * The JSON to hand to populate_comps.py --skip-fetch.
  * `selected_comps` order IS the COMPS tab column order (1-8).
  */
 function buildPopulatorPayload() {
   const s = STATE.subject || {};
   const rents = marketRentTable();
+  const byPlan = subjectMarketRentsByPlan();
 
   return {
     skill_chain: 'rent-comps-tracker -> rent-comp-data-populator (populate_comps.py --skip-fetch)',
@@ -263,8 +305,18 @@ function buildPopulatorPayload() {
         sf: numOrNull(r.sqft),
         rent: numOrNull(r.current_rent),
         status: r.status || '',
+        /* Captured in the Screener, per plan+finish. The populator writes column G
+           per PLAN, so it should use subject_market_rents_by_plan below; this is
+           here so the row-level figure is not lost from the record. */
+        market_rent: numOrNull(r.market_rent),
       })),
     },
+
+    /* Column G, resolved BY PLAN LABEL. `market_rents` below stays keyed by
+       section for the bucket-level maths and for older populators; a populator
+       that understands this block must prefer it, because the section figure
+       cannot express six different 1x1 rents. */
+    subject_market_rents_by_plan: Object.keys(byPlan).map(k => byPlan[k]),
 
     /* Explicit market rents so the populator does not have to re-derive them
        and so a manual override is honoured. Keyed by COMPS section. */
@@ -579,15 +631,35 @@ async function buildCompsWorkbook() {
       r.eachCell(cell => { cell.font = font; });
     };
 
-    // Subject column G market rents — one per subject row with units > 0.
-    marketRentTable().forEach(r => {
-      if (r.effective <= 0) return;
-      const rows = subjectBucketAgg(r.bucket.key).rows.filter(x => num(x.count) > 0);
-      const n = Math.max(1, Math.min(rows.length, r.bucket.endRow - r.bucket.startRow + 1));
-      for (let k = 0; k < n; k++) {
-        put(r.bucket.startRow + k, TAB.subjectMktRentCol || 7, 'Subject',
-          `Mkt $/Mo (${r.bucket.short})`, r.effective);
-      }
+    /* An entry whose ROW only the destination workbook can determine: the target
+       is "the row in this column whose label cell reads <label>". Used for the fee
+       band and for the subject's column G. */
+    const putByLabel = (col, label, who, field, value) => {
+      if (value === '' || value == null) return;
+      const r = ws.addRow([
+        colLetter(col) + '·"' + label + '"', 'by label', colLetter(col),
+        who, field, value,
+      ]);
+      r.eachCell(cell => { cell.font = font; });
+    };
+
+    /* Subject column G — identified BY PLAN LABEL, not by row.
+       This used to emit `startRow + k` for k rows with units > 0, which was wrong
+       twice over on a real file: the tracker holds one row per plan+finish while
+       COMPS holds one per plan, and COMPS' own rows with units > 0 are a different
+       subset again. Reconciling Lantern that way produced three flat mismatches on
+       rows the populator correctly skips (G36/G37/G40, unit count 0) while hiding
+       that six distinct 1x1 rents were being collapsed into one.
+       Only the destination workbook knows which row carries which plan, so the
+       entry names the label and the populator resolves it — the same contract the
+       fee band uses. */
+    const byPlanCM = subjectMarketRentsByPlan();
+    Object.keys(byPlanCM).forEach(plan => {
+      const e = byPlanCM[plan];
+      putByLabel(TAB.subjectMktRentCol || 7, plan, 'Subject',
+        `Mkt $/Mo — ${plan} (${bucketByKey(e.bucket) ? bucketByKey(e.bucket).short : e.bucket}) `
+        + `— skipped if that plan has no COMPS row or 0 units`,
+        e.market_rent);
     });
 
     comps.forEach((c, i) => {
@@ -599,7 +671,11 @@ async function buildCompsWorkbook() {
       put(TAB.rowHeader, base + off.compAddress, who, 'Street address', streetOnly(c.address));
 
       put(TAB.rowDetails, base + off.yearBuilt, who, 'Year built', numOrNull(c.year_built));
-      put(TAB.rowDetails, base + off.totalUnits, who, 'Total units', numOrNull(c.total_units));
+      /* Rounded to match the populator, which writes an integer. A live record
+         carried `635.4` units (Copper Lines — the importer picked up a fractional
+         cell), which reconciled as a mismatch against a correctly-written 635. */
+      put(TAB.rowDetails, base + off.totalUnits, who, 'Total units',
+        c.total_units === '' || c.total_units == null ? null : Math.round(num(c.total_units)));
       /* v7 row-4 order: distance is offset 2 and property-level vacancy offset 3.
          The v3 map had stories/distance in those two cells, which is how v30 came
          to render a 1.3-mile comp as "Vac: 130.0%". Stories has no cell at all
@@ -628,7 +704,14 @@ async function buildCompsWorkbook() {
           const row = b.startRow + j;
           if (row > b.endRow) return;   // section full — dropped, flagged on Unit Mix
           const tag = `${b.short} ${r.plan || '#' + (j + 1)}`;
-          put(row, base + off.unitRowNum, who, tag + ' — row #', j + 1);
+          /* ⚠️ offset 0 (the unit line-# serial) is NOT on this map, deliberately.
+             The populator does not write it from the payload — v34+ RESTORES the
+             template's own section-prefixed serials (101-109, 211+, 221+, 321+)
+             from the pristine comp slot 9, repairing what a pre-v34 run clobbered.
+             Asserting `j + 1` here produced 59 false mismatches on one Lantern run
+             — enough to make the whole reconciliation unreadable — while the
+             populator was doing exactly the right thing. Same reasoning that keeps
+             the row-4 manual dropdowns (W/D, utilities) off the map. */
           put(row, base + off.unitCount, who, tag + ' — # units', numOrNull(r.count));
           put(row, base + off.unitSf, who, tag + ' — SF', numOrNull(r.sqft));
           /* Occ %: v24-v32 wrote a flat 0.95 here regardless of what was
