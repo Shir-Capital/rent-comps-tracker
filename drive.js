@@ -640,7 +640,11 @@ async function pullFromDrive(opts) {
   if (!driveConnected()) { if (!silent) toast('Connect Google Drive first'); return false; }
   if (!STATE.drive.folderId) { if (!silent) toast('No Drive deal folder linked'); return false; }
 
-  if (!silent && deviceIsDirty()) {
+  /* `confirmed` is for callers that have already asked, with a better question
+     than this one can ask. The sync bar's "Take the Drive version" explains that
+     a dated backup is written first; prompting again here would just be a second
+     dialog saying less. Everything else still gets the guard. */
+  if (!silent && !(opts && opts.confirmed) && deviceIsDirty()) {
     const ok = confirm('This device has edits that have not reached Drive yet.\n\n'
       + 'Re-syncing will REPLACE them with the Drive copy. Continue?');
     if (!ok) return false;
@@ -705,8 +709,18 @@ async function reconcileFromDrive() {
       await pullFromDrive({ silent: true });
       toast('Loaded the latest copy from Drive');
     } else if (remoteIsNewer && deviceIsDirty()) {
-      showSyncBar('⚠️ Drive has a newer copy of this property and this device has '
-        + 'unsynced edits. Use ☰ → Re-sync from Drive to take the Drive version.');
+      /* A real fork: two devices edited the same subject. Both directions lose
+         something, so the bar offers both and says which. */
+      showSyncBar('⚠️ <b>Drive has a newer copy</b> of this property, and this device '
+        + 'has unsynced edits. One of the two has to win.', {
+        reason: 'conflict',
+        actions: [
+          { key: 'pull', cls: 'primary', label: '↓ Take the Drive version',
+            title: "Backs up this device's copy to the Backups folder first, then loads Drive's" },
+          { key: 'push', cls: 'danger', label: '↑ Keep this device’s version',
+            title: "Overwrites the newer copy on Drive with what is on this device" },
+        ],
+      });
     }
   } catch (e) {
     console.warn('reconcileFromDrive', e);
@@ -722,15 +736,119 @@ function updateSyncStatus() {
     + ' · last backup ' + relTime(STATE.drive.lastBackupAt);
 }
 
-function showSyncBar(html) {
+/* ---------------------------------------------------------------- sync bar
+   The bar used to end with "Use ☰ → Re-sync from Drive", which is the app
+   telling you the answer and making you go find it. It is now the control:
+   click it and it offers the ways out of whatever state it is reporting.
+
+   `reason` is not decoration. syncTick() runs every SYNC_INTERVAL_MS and used to
+   call hideSyncBar() unconditionally whenever nobody else was editing — which
+   silently wiped the conflict bar about a minute after it appeared, warning and
+   all. Now only the owner of a notice may clear it: syncTick clears 'coeditor',
+   and a bare hideSyncBar() (leaving the property) still clears anything. */
+let SYNC_BAR = null;        // { reason, msg, actions } | null
+let SYNC_BAR_OPEN = false;  // are the action buttons showing?
+
+function showSyncBar(html, opts) {
   const bar = $('#sync-bar');
   if (!bar) return;
-  bar.innerHTML = html;
+  const o = opts || {};
+  const reason = o.reason || 'info';
+  /* Re-showing the SAME notice must not slam the menu shut under the user's
+     cursor — syncTick re-asserts the co-editor bar every minute. */
+  if (!SYNC_BAR || SYNC_BAR.reason !== reason) SYNC_BAR_OPEN = false;
+  SYNC_BAR = { reason, msg: html, actions: o.actions || [] };
+  renderSyncBar();
   bar.classList.remove('hidden');
 }
-function hideSyncBar() {
+
+function hideSyncBar(reason) {
+  if (reason && SYNC_BAR && SYNC_BAR.reason !== reason) return;
+  SYNC_BAR = null;
+  SYNC_BAR_OPEN = false;
   const bar = $('#sync-bar');
-  if (bar) bar.classList.add('hidden');
+  if (bar) { bar.innerHTML = ''; bar.classList.add('hidden'); }
+}
+
+function renderSyncBar() {
+  const bar = $('#sync-bar');
+  if (!bar || !SYNC_BAR) return;
+  const acts = SYNC_BAR.actions;
+  /* Built from the app's existing .btn / .btn-row classes rather than new ones:
+     .btn-row already scrolls sideways on a narrow phone instead of wrapping. */
+  const buttons = acts.length && SYNC_BAR_OPEN
+    ? '<div class="btn-row" style="margin-top:6px">'
+      + acts.map(a => '<button type="button" class="btn small' + (a.cls ? ' ' + a.cls : '')
+          + '" data-syncact="' + esc(a.key) + '"'
+          + (a.title ? ' title="' + esc(a.title) + '"' : '') + '>' + a.label + '</button>').join('')
+      + '<button type="button" class="btn small" data-syncact="dismiss"'
+      + ' title="Hide this until the next check">Dismiss</button>'
+      + '</div>'
+    : '';
+  const more = acts.length
+    ? ' <span style="text-decoration:underline;cursor:pointer;white-space:nowrap">'
+      + (SYNC_BAR_OPEN ? '▾ hide options' : '▸ how do I fix this?') + '</span>'
+    : '';
+  bar.innerHTML = SYNC_BAR.msg + more + buttons;
+  bar.style.cursor = acts.length ? 'pointer' : '';
+  bar.onclick = onSyncBarClick;
+}
+
+/** Anywhere on the bar toggles the options; a button runs its action. */
+function onSyncBarClick(ev) {
+  if (!SYNC_BAR) return;
+  const btn = ev.target.closest('[data-syncact]');
+  if (!btn) {
+    if (!SYNC_BAR.actions.length) return;
+    SYNC_BAR_OPEN = !SYNC_BAR_OPEN;
+    renderSyncBar();
+    return;
+  }
+  ev.stopPropagation();
+  runSyncAction(btn.getAttribute('data-syncact'));
+}
+
+async function runSyncAction(key) {
+  if (key === 'dismiss') { hideSyncBar(); return; }
+  if (!STATE) { hideSyncBar(); return; }
+
+  if (key === 'recheck') {
+    toast('Checking Drive…');
+    await syncTick();
+    if (SYNC_BAR) toast('Still out of sync');
+    return;
+  }
+
+  if (key === 'pull') {
+    if (!confirm('Take the Drive version of "' + STATE.name + '"?\n\n'
+      + "This device's unsynced edits are replaced. A dated backup of this "
+      + 'device\'s copy is written to 3. Comps / Rent Comps Tracker / Backups '
+      + 'first, so nothing is unrecoverable.')) return;
+    /* Backup BEFORE the pull, because after it the local edits are gone.
+       ⚠️ writeBackup keeps one file per calendar day, so if a backup already
+       ran today this replaces today's file — still the safer order, and the
+       only copy that matters here is the one about to be discarded. */
+    try {
+      await writeBackup(STATE, { force: true });
+    } catch (e) {
+      if (!confirm('The backup failed (' + (e.message || e) + ').\n\n'
+        + "Take the Drive version anyway? This device's edits would be lost.")) return;
+    }
+    const okPull = await pullFromDrive({ confirmed: true });
+    if (okPull) { hideSyncBar(); toast('Now on the Drive version'); }
+    return;
+  }
+
+  if (key === 'push') {
+    if (!confirm('Keep this device\'s version of "' + STATE.name + '"?\n\n'
+      + 'The NEWER copy on Drive is overwritten — whoever made those edits loses '
+      + 'them. Their work stays in the Backups folder only if it was backed up.')) return;
+    /* Deliberately NOT silent: pushToDrive only refuses to clobber a newer
+       remote on a silent push, and overwriting is exactly what was asked for. */
+    const okPush = await pushToDrive();
+    if (okPush) { hideSyncBar(); toast('Drive now has this device’s version'); }
+    return;
+  }
 }
 
 // ----------------------------------------------------------------- manifest
@@ -908,10 +1026,22 @@ async function syncTick() {
       if (e && e.currentEditor && e.currentEditor !== me && e.currentEditorHeartbeatAt) {
         const age = Date.now() - new Date(e.currentEditorHeartbeatAt).getTime();
         if (age < HEARTBEAT_STALE_MS) {
-          showSyncBar('⚠️ ' + esc(e.currentEditor) + ' is also editing this property (active '
-            + esc(relTime(e.currentEditorHeartbeatAt)) + ') — your edits may overwrite theirs.');
-        } else { hideSyncBar(); }
-      } else { hideSyncBar(); }
+          showSyncBar('⚠️ <b>' + esc(e.currentEditor) + '</b> is also editing this property '
+            + '(active ' + esc(relTime(e.currentEditorHeartbeatAt)) + ') — your edits may '
+            + 'overwrite theirs.', {
+            reason: 'coeditor',
+            actions: [
+              { key: 'recheck', cls: 'primary', label: '↻ Check again',
+                title: 'Re-read the shared index to see if they have stopped' },
+              { key: 'pull', label: '↓ Take the Drive version',
+                title: "Backs up this device's copy first, then loads whatever is on Drive now" },
+            ],
+          });
+        /* ⚠️ Both of these clear ONLY 'coeditor'. Unqualified, they wiped the
+           conflict bar reconcileFromDrive() had put up, roughly a minute after it
+           appeared — warning and options gone, with the conflict still live. */
+        } else { hideSyncBar('coeditor'); }
+      } else { hideSyncBar('coeditor'); }
     }
     await upsertManifestEntry(STATE);
     updateSyncStatus();
