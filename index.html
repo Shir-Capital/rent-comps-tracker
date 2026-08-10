@@ -17,6 +17,8 @@
 <link rel="stylesheet" href="proforma-import.css" />
 <!-- Tab 3 (the Screener) is likewise its own pair of files. -->
 <link rel="stylesheet" href="screener.css" />
+<!-- Tab 2's comp map, ditto: map.js + map.css are the whole feature. -->
+<link rel="stylesheet" href="map.css" />
 </head>
 <body>
 <header class="app-header">
@@ -91,6 +93,9 @@
 <script src="proforma-import.js"></script>
 <!-- Must load after ui.js: it replaces window.renderPhase3 with the Screener. -->
 <script src="screener.js"></script>
+<!-- Tab 2's comp map. renderPhase2() calls into it at runtime only, so it just
+     has to be in before boot. Leaflet itself is fetched lazily by map.js. -->
+<script src="map.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
