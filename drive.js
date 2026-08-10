@@ -310,6 +310,21 @@ async function driveEnsureSubfolder(parentId, name) {
   }
 }
 
+/**
+ * Find a subfolder by name under parent WITHOUT creating it. Returns '' when
+ * absent. driveEnsureSubfolder's read-only twin: a bulk pass over every deal
+ * folder (⤓ Update All) must never leave a trail of empty "3. Comps /
+ * Rent Comps Tracker" folders in deals that have never used this app.
+ */
+async function driveFindSubfolder(parentId, name) {
+  const safe = String(name).replace(/'/g, "\\'");
+  const hits = await driveList(
+    `'${parentId}' in parents and name='${safe}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+    'id,name'
+  );
+  return hits.length ? hits[0].id : '';
+}
+
 async function driveGetMeta(fileId, fields) {
   return driveFetch('/drive/v3/files/' + fileId
     + '?fields=' + Q(fields || 'id,name,modifiedTime,size')
@@ -732,10 +747,13 @@ async function fetchManifest(force) {
         localStorage.setItem(MANIFEST_FILE_ID_KEY, fileId);
       }
     }
-    if (!fileId) { MANIFEST_CACHE = { fileId: '', data: { properties: [] } }; return MANIFEST_CACHE; }
+    // `fetchedAt` drives the home header's "📋 Index · 2m ago" stamp, so it is
+    // when THIS DEVICE last read the file — not data.updatedAt, which is when
+    // someone last wrote it. The two answer different questions.
+    if (!fileId) { MANIFEST_CACHE = { fileId: '', data: { properties: [] }, fetchedAt: nowISO() }; return MANIFEST_CACHE; }
     const data = JSON.parse(await driveDownloadText(fileId)) || {};
     if (!Array.isArray(data.properties)) data.properties = [];
-    MANIFEST_CACHE = { fileId, data };
+    MANIFEST_CACHE = { fileId, data, fetchedAt: nowISO() };
     return MANIFEST_CACHE;
   } catch (e) {
     console.warn('fetchManifest', e);
@@ -743,6 +761,10 @@ async function fetchManifest(force) {
   }
 }
 
+/* ⚠️ Deliberately does NOT carry `archived`. Every sync tick upserts this entry,
+   so including the local flag would let a device with a stale copy silently
+   un-archive something a teammate archived minutes ago. Archiving goes through
+   setManifestArchived(), which read-modify-writes just that one field. */
 function manifestEntryFor(p) {
   const rents = marketRentTableSafe();
   return {
@@ -801,6 +823,64 @@ async function removeManifestEntry(id) {
   }
 }
 
+// ------------------------------------------------------------------ archive
+/**
+ * Propagate a subject's archived state to EVERY device by writing it into the
+ * shared org manifest — the same channel the home index and editor presence use.
+ * Read-modify-write against a fresh fetch, and upsert so the flag lands even for
+ * a subject that has not been indexed yet. A folderless (local-only) subject has
+ * nothing to propagate to; its local flag is the whole story.
+ *
+ * ⚠️ Writes unconditionally — deliberately no "the flag already matches, skip it"
+ * short-circuit. Its caller has already stamped the new value onto MANIFEST_CACHE
+ * so the header repaints instantly, and fetchManifest() falls back to that same
+ * cache object when the network call fails. A same-value check would therefore
+ * read our own optimistic write, conclude "already in sync", and drop the org-wide
+ * update on the floor — silently, exactly when the network is the thing failing.
+ * The cost of getting this wrong is a stale archive for the whole team; the cost of
+ * always writing is one small JSON PUT.
+ */
+async function setManifestArchived(p, archived) {
+  if (!p || !p.id || !driveConnected()) return;
+  const hasFolder = !!(p.drive && p.drive.folderId);
+  try {
+    const m = await fetchManifest(true);
+    if (!m) return;
+    const i = m.data.properties.findIndex(x => x.id === p.id);
+    if (i >= 0) {
+      m.data.properties[i].archived = !!archived;
+    } else if (hasFolder) {
+      m.data.properties.push(Object.assign(manifestEntryFor(p), { archived: !!archived }));
+    } else {
+      return;
+    }
+    m.data.updatedAt = nowISO();
+    const r = await driveUploadJson(SYNC_FOLDER_ID, MANIFEST_FILENAME, m.data, m.fileId || undefined);
+    m.fileId = r.id;
+    localStorage.setItem(MANIFEST_FILE_ID_KEY, r.id);
+    renderHome();   // repaint against the confirmed org-index state
+  } catch (e) {
+    console.warn('setManifestArchived', e);
+    // The local flag still holds and a later archive/restore retries — but say so,
+    // otherwise the user believes the whole org just saw this change.
+    if (hasFolder) toast('Archived on this device, but the shared index did not update — retry later', 4200);
+  }
+}
+
+function setPropertyArchived(p, archived) {
+  p.archived = !!archived;                     // local hint (drawer label / offline)
+  if (STATE && STATE.id === p.id) saveState();
+  else saveStore();
+  // Reflect it in the cached index immediately so the header count is right on
+  // this render, not one Drive round-trip later.
+  if (MANIFEST_CACHE && MANIFEST_CACHE.data && Array.isArray(MANIFEST_CACHE.data.properties)) {
+    const e = MANIFEST_CACHE.data.properties.find(x => x.id === p.id);
+    if (e) e.archived = !!archived;
+  }
+  setManifestArchived(p, archived);             // async → org-wide
+  toast(archived ? `Archived “${p.name || 'subject'}”` : `Restored “${p.name || 'subject'}” to Live`);
+}
+
 async function releaseEditorLock() {
   if (!STATE || !driveConnected()) return;
   try {
@@ -854,3 +934,135 @@ window.addEventListener('beforeunload', () => {
   stopAutoSync();
   releaseEditorLock();
 });
+
+// ------------------------------------------------- "⤓ Update All" bulk pull
+/*
+ * 🔄 Refresh re-reads the org INDEX only — names, badge counts, who is editing.
+ * This pulls each subject's actual saved `rent_comps.json` down to this device:
+ * index-only (☁) subjects become local, and already-local ones adopt a
+ * teammate's newer copy. It NEVER overwrites a subject with unsynced local edits
+ * (reported as skipped) and never touches the one that is currently open.
+ */
+let HOME_PULL_ALL_RUNNING  = false;
+let HOME_PULL_ALL_PROGRESS = null;    // {done, total} while running
+let HOME_PULL_ALL_AT       = null;    // ISO time of the last completed pass
+let HOME_PULL_ALL_IDS      = new Set(); // ids that actually changed in it
+
+/**
+ * Pull one merged home entry. Returns a status string:
+ *   'added'  — was ☁ index-only, now on this device
+ *   'updated'— local copy adopted a newer Drive copy
+ *   'current'| 'dirty' (unsynced local edits, left alone) | 'open'
+ *   'nofolder' | 'nofile' | 'error'
+ */
+async function pullOnePropertyFromDrive(entry) {
+  const local = entry.local, remote = entry.remote;
+  // Never yank the open subject out from under whoever is typing in it.
+  if (local && STATE && STATE.id === local.id) return 'open';
+
+  const folderId = (local && local.drive && local.drive.folderId) || (remote && remote.dealFolderId) || '';
+  let trackerFolder = (local && local.drive && local.drive.trackerFolderId) || '';
+  let fileId = (local && local.drive && local.drive.fileId) || (remote && remote.trackerFileId) || '';
+
+  if (!fileId) {
+    if (!folderId) return 'nofolder';
+    if (!trackerFolder) {
+      // Find-only, never create — see driveFindSubfolder.
+      const comps = await driveFindSubfolder(folderId, COMPS_FOLDER);
+      if (!comps) return 'nofile';
+      trackerFolder = await driveFindSubfolder(comps, TRACKER_FOLDER);
+      if (!trackerFolder) return 'nofile';
+    }
+    const hits = await driveList(
+      `'${trackerFolder}' in parents and name='${STATE_FILENAME}' and trashed=false`, 'id,name,modifiedTime');
+    if (!hits.length) return 'nofile';
+    fileId = hits[0].id;
+  }
+
+  const meta = await driveGetMeta(fileId, 'id,modifiedTime');
+
+  if (local) {
+    if (trackerFolder) local.drive.trackerFolderId = trackerFolder;   // cache for next pass
+    local.drive.fileId = fileId;
+    const remoteNewer = meta.modifiedTime
+      && (!local.drive.remoteModifiedTime || meta.modifiedTime > local.drive.remoteModifiedTime);
+    if (!remoteNewer) return 'current';
+    // deviceIsDirty() reads STATE; this entry is not STATE, so test it directly.
+    const dirty = !local.drive.lastPushed || String(local.updated || '') > String(local.drive.lastPushed);
+    if (dirty) return 'dirty';
+  }
+
+  const data = JSON.parse(await driveDownloadText(fileId));
+
+  if (local) {
+    // Same content swap as pullFromDrive, on a property object that is not STATE:
+    // keep our local id + Drive pointers, adopt every content field.
+    const keepId = local.id;
+    const keepDrive = Object.assign({}, local.drive, {
+      fileId,
+      lastPulled: nowISO(),
+      remoteModifiedTime: meta.modifiedTime,
+      lastPushed: meta.modifiedTime,
+    });
+    STORE.properties[keepId] = hydrateProperty(
+      Object.assign({}, data, { id: keepId, drive: keepDrive }));
+    return 'updated';
+  }
+
+  // Index-only entry -> materialize it locally (same shape openRemoteProperty builds).
+  const p = hydrateProperty(data);
+  p.id = (remote && remote.id) || p.id || uid();
+  p.drive.folderId = p.drive.folderId || folderId;
+  if (trackerFolder) p.drive.trackerFolderId = trackerFolder;
+  p.drive.fileId = fileId;
+  p.drive.lastPulled = nowISO();
+  p.drive.lastPushed = meta.modifiedTime;
+  p.drive.remoteModifiedTime = meta.modifiedTime;
+  STORE.properties[p.id] = p;
+  return 'added';
+}
+
+async function pullAllFromDrive() {
+  if (HOME_PULL_ALL_RUNNING) return;
+  if (!driveConnected()) { driveConnect(); return; }
+
+  await fetchManifest(true);                 // widest possible property set
+  const entries = mergedHomeEntries();
+  if (!entries.length) { toast('No subjects to update'); return; }
+
+  HOME_PULL_ALL_RUNNING = true;
+  HOME_PULL_ALL_IDS = new Set();
+  HOME_PULL_ALL_PROGRESS = { done: 0, total: entries.length };
+  renderHome();
+
+  const tally = {};
+  for (const e of entries) {
+    let st;
+    try { st = await pullOnePropertyFromDrive(e); }
+    catch (err) { console.warn('pullAllFromDrive', err); st = 'error'; }
+    tally[st] = (tally[st] || 0) + 1;
+    if (st === 'added' || st === 'updated') {
+      const id = (e.local && e.local.id) || (e.remote && e.remote.id);
+      if (id) HOME_PULL_ALL_IDS.add(id);
+    }
+    HOME_PULL_ALL_PROGRESS.done++;
+    paintPullAllProgress();                  // in-place label, no full re-render
+  }
+
+  saveStore();
+  HOME_PULL_ALL_RUNNING = false;
+  HOME_PULL_ALL_PROGRESS = null;
+  HOME_PULL_ALL_AT = nowISO();
+  renderHome();
+
+  const bits = [];
+  const n = k => tally[k] || 0;
+  if (n('added'))   bits.push(n('added') + ' loaded');
+  if (n('updated')) bits.push(n('updated') + ' updated');
+  if (n('current')) bits.push(n('current') + ' already current');
+  if (n('dirty'))   bits.push(n('dirty') + ' skipped (unsynced edits)');
+  if (n('open'))    bits.push('1 open (skipped)');
+  if (n('nofolder') + n('nofile')) bits.push((n('nofolder') + n('nofile')) + ' not on Drive yet');
+  if (n('error'))   bits.push(n('error') + ' failed');
+  toast(bits.length ? bits.join(' · ') : 'Nothing to update', 5200);
+}
