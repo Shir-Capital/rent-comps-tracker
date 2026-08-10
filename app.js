@@ -53,6 +53,14 @@ function openDrawer() {
   updateSyncStatus();
   updateFolderStatus();
   updateHelloDataStatus();
+  updateArchiveButton();
+}
+
+/** One button, two directions — the label has to say which one you get. */
+function updateArchiveButton() {
+  const b = $('#btn-archive');
+  if (!b || !STATE) return;
+  b.textContent = STATE.archived ? '↩ Restore to Live' : '🗄 Archive Subject';
 }
 function closeDrawer() { $('#menu-drawer').classList.add('hidden'); }
 
@@ -101,11 +109,20 @@ function wireHomeDelegation() {
     const refresh = ev.target.closest('#btn-home-refresh');
     if (refresh) {
       if (!driveConnected()) { driveConnect(); return; }
-      toast('Refreshing…');
+      toast('Refreshing the index…');
       refreshHomeIndex();
       return;
     }
-    const add = ev.target.closest('#btn-new-prop');
+    // ⤓ Update All Subjects — pulls every subject's saved data, not just the index.
+    if (ev.target.closest('#btn-home-pull-all')) { pullAllFromDrive(); return; }
+    // Live ⇄ Archived view toggle.
+    if (ev.target.closest('#btn-home-archived')) { HOME_VIEW_MODE = 'archived'; renderHome(); return; }
+    if (ev.target.closest('#btn-home-live'))     { HOME_VIEW_MODE = 'live';     renderHome(); return; }
+    if (ev.target.closest('#btn-home-sort-dir')) {
+      setHomeSort(HOME_SORT_FIELD, HOME_SORT_DIR === 'asc' ? 'desc' : 'asc');
+      return;
+    }
+    const add = ev.target.closest('#btn-new-prop, #btn-new-prop-fab');
     if (add) {
       const name = prompt('Subject property name?\n\n'
         + 'Use the deal-folder name so the Drive folder search matches, e.g. "AUS TX - Crestwood".');
@@ -124,6 +141,12 @@ function wireHomeDelegation() {
         .find(e => e.id === id);
       if (entry) openRemoteProperty(entry);
     }
+  });
+
+  // The sort field is a <select>, so it needs `change`, not `click`.
+  host.addEventListener('change', (ev) => {
+    const sel = ev.target.closest('#home-sort-field');
+    if (sel) setHomeSort(sel.value, HOME_SORT_DIR);
   });
 }
 
@@ -155,6 +178,25 @@ function wireDrawer() {
     setHash(propertyHash(STATE));
     renderCurrentPhase();
     toast('Renamed — the old shareable URL is now stale');
+  };
+
+  /* Archive hides a subject from the main list without deleting anything, here or
+     on Drive — the pipeline accumulates dead deals faster than anyone prunes them.
+     Either direction closes the subject, because it has just moved to the list
+     you are not looking at. */
+  /* Guarded, unlike its neighbours: this button is NEW, so it is the one element
+     in here that a stale cached index.html can be missing — and an unguarded
+     `null.onclick` in wireDrawer() would take the whole boot down with it. */
+  if ($('#btn-archive')) $('#btn-archive').onclick = () => {
+    if (!STATE) return;
+    const to = !STATE.archived;
+    if (to && !confirm('Archive "' + STATE.name + '"?\n\n'
+      + 'It moves off the main list into 🗄 Archived, for everyone. Nothing is deleted '
+      + '— on Drive or on this device — and you can restore it any time.')) return;
+    setPropertyArchived(STATE, to);
+    HOME_VIEW_MODE = 'live';   // archived → it is simply gone from here; restored → it is back
+    closeDrawer();
+    closeProperty();
   };
 
   $('#btn-delete').onclick = async () => {

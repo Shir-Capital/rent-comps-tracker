@@ -16,6 +16,9 @@ const DRIVE_EVER_CONNECTED_KEY = 'rent_comps_drive_ever_connected_v1';
 const ONBOARDING_DISMISSED_KEY = 'rent_comps_onboarding_dismissed_v1';
 const HELLODATA_KEY_STORAGE   = 'rent_comps_hellodata_key_v1';
 const MANIFEST_FILE_ID_KEY    = 'rent_comps_manifest_file_id';
+// Home-list sort, remembered per device (see HOME_SORT_FIELD / _DIR in ui.js).
+const HOME_SORT_FIELD_KEY     = 'rent_comps_home_sort_field';
+const HOME_SORT_DIR_KEY       = 'rent_comps_home_sort_dir';
 
 const STATE_FILENAME  = 'rent_comps.json';
 const COMPS_FOLDER    = '3. Comps';           // numbered deal subfolder
@@ -260,6 +263,12 @@ function hydrateProperty(p) {
     autoSearchAttempted: false,
   }, p.drive || {});
   delete p.asana;   // Asana integration removed 2026-08-03; drop it from old records
+  /* Archive flag (2026-08-10). Absent on every pre-existing record, and absent
+     must read as Live — `!!undefined` already does, so this is only here to keep
+     the key present in the JSON we push to Drive. The ORG MANIFEST is the source
+     of truth whenever it has an opinion (see isEntryArchived); this is the
+     same-device hint used for the drawer's button label and offline. */
+  if (p.archived === undefined) p.archived = false;
   p.subject = p.subject || {};
   if (p.subject.util_structure === undefined) p.subject.util_structure = '';
   if (p.subject.wd_type && WD_TYPE_MIGRATION[p.subject.wd_type]) {
