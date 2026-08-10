@@ -1,0 +1,257 @@
+/* ============================================================================
+   Rent Comps Tracker — map.css
+   The tab-2 comp map and the split that puts it beside the comp cards.
+   Own stylesheet for the same reason map.js is its own file: deleting the pair
+   removes the feature completely and touches nothing else.
+
+   PHONE FIRST, like the rest of this app. Stacked below 900px with a short
+   fixed height, because on a phone the cards are the job and the map is
+   orientation; side by side only arrives at desktop width, where there is room
+   for a 12-column unit table AND a map without squeezing either.
+   ========================================================================= */
+
+/* ------------------------------------------------------------------ split */
+/* Phone: one column, map FIRST (it is the cheapest way to answer "where am
+   I?"), and collapsible — collapsed costs only the card header, and the choice
+   is remembered, so a user who only wants cards pays for the map once.
+   The DOM order is cards-then-map because that is the reading order at desktop
+   width; `order` flips it here rather than in the markup, and the explicit
+   grid placement in the 900px block below flips it back. */
+.p2-split { display: flex; flex-direction: column; }
+.p2-map { order: -1; margin-bottom: 10px; }
+
+/* ------------------------------------------------------------- map canvas */
+.map-canvas {
+  height: 240px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #eef2f7;
+  /* Leaflet stacks its own panes from z-index 200 up to 800 (popups). Those
+     numbers are far above the sticky header's 60 and the tab strip's 50, so
+     without a stacking context of their own an open popup would paint straight
+     over the app chrome. `isolation` plus a z-index of 0 traps the whole
+     Leaflet z-order inside this element. */
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
+
+/* Leaflet ships its own font stack; match the app so popups do not read as a
+   different product bolted on. */
+.map-canvas .leaflet-container {
+  font-family: inherit;
+  font-size: 13px;
+  background: #eef2f7;
+}
+.map-canvas .leaflet-control-attribution { font-size: 10px; }
+
+/* --------------------------------------------------------------- the pins */
+/* divIcon markers: pure CSS, no image assets, so Leaflet's icon-path problem
+   never arises and the colours are the same variables the cards and pills use. */
+.mpin-wrap { background: transparent; border: 0; }
+.mpin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, .45);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--muted);
+  transition: transform .12s ease;
+}
+.mpin-subject       { background: var(--navy); font-size: 15px; width: 30px; height: 30px; margin: -2px; }
+.mpin-direct        { background: var(--direct); }
+.mpin-aspirational  { background: var(--aspirational); }
+.mpin-inferior      { background: var(--inferior); }
+.mpin-none          { background: var(--muted); }
+/* On the KML but not in the comp list — drawn hollow so a stale map is visible
+   at a glance, not only in the drift banner below. */
+.mpin-orphan {
+  background: #fff;
+  color: var(--muted);
+  border: 2px dashed var(--muted);
+  box-shadow: none;
+}
+/* Hovering a comp card grows its pin. */
+.mpin-hot { transform: scale(1.35); z-index: 500; }
+
+/* ------------------------------------------------------------- the legend */
+.map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.map-leg { display: inline-flex; align-items: center; gap: 4px; }
+.mpin-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.mpin-dot.mpin-subject      { background: var(--navy); }
+.mpin-dot.mpin-direct       { background: var(--direct); }
+.mpin-dot.mpin-aspirational { background: var(--aspirational); }
+.mpin-dot.mpin-inferior     { background: var(--inferior); }
+
+/* -------------------------------------------------------------- popups */
+.mpop { min-width: 170px; }
+.mpop-h { font-size: 14px; font-weight: 700; color: var(--navy); line-height: 1.2; }
+.mpop-tag {
+  display: inline-block;
+  margin: 3px 0 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--muted);
+}
+.mpop-tag.subject       { background: var(--navy); }
+.mpop-tag.direct        { background: var(--direct); }
+.mpop-tag.aspirational  { background: var(--aspirational); }
+.mpop-tag.inferior      { background: var(--inferior); }
+.mpop-tag.none          { background: var(--muted); }
+.mpop-r { font-size: 12.5px; line-height: 1.35; color: var(--ink); }
+.mpop-r.muted { color: var(--muted); }
+.mpop-r.pre { white-space: pre-line; }
+.mpop-a { margin-top: 6px; }
+.mpop-a button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--navy);
+  cursor: pointer;
+}
+.mpop-a button:hover { background: #f1f5f9; }
+
+/* ------------------------------------------------------------ placeholder */
+/* What you see when the deal has no KML. It has to name the skill that makes
+   one — that is the whole point of the empty state. */
+.map-ph {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 5px;
+  padding: 16px 12px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.map-ph-art { width: 120px; height: 78px; opacity: .9; }
+.map-ph-title { font-size: 15px; font-weight: 700; color: var(--navy); }
+.map-ph-msg { font-size: 13px; color: var(--ink); max-width: 44ch; }
+.map-ph-path {
+  font-size: 12px;
+  color: var(--muted);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 8px;
+  word-break: break-word;
+}
+.map-ph-hint { font-size: 12px; color: var(--muted); max-width: 44ch; }
+
+/* -------------------------------------------------------- drift reporting */
+.map-recon {
+  margin-top: 7px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.map-recon.ok   { color: var(--ok); background: var(--ok-bg); }
+.map-recon.warn { color: var(--warn); background: var(--warn-bg); }
+
+.map-foot {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+}
+.map-foot .muted { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-link { font-size: 12px; font-weight: 600; color: var(--navy); text-decoration: none; white-space: nowrap; }
+.map-link:hover { text-decoration: underline; }
+
+/* ------------------------------------------- the "on the map" card chip */
+/* Sits in the comp-card head. Absent = that comp has no pin, which is the
+   per-card echo of the drift banner. */
+.pin-chip {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, .45);
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+  cursor: pointer;
+}
+.pin-chip:hover { background: rgba(255, 255, 255, .3); }
+
+/* A pin click leads here: the card, briefly ringed so the eye lands on it. */
+.card-flash { animation: cardFlash 1.4s ease-out 1; }
+@keyframes cardFlash {
+  0%   { box-shadow: 0 0 0 0 rgba(59, 130, 246, .0); }
+  15%  { box-shadow: 0 0 0 4px rgba(59, 130, 246, .55); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+/* ============================================================================
+   DESKTOP MODE (>= 900px) — the side-by-side the whole feature is for
+   ----------------------------------------------------------------------------
+   Cards left, map right and STICKY: the map is a reference you glance at while
+   reading down eight comps, so it has to stay put while the list scrolls. Its
+   top offset is the sticky header + tab strip, the same two values styles.css
+   shrinks at this width.
+   ========================================================================= */
+@media (min-width: 900px) {
+  .p2-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    gap: 10px;
+    align-items: start;
+  }
+  /* Explicit placement, because grid ignores the phone's `order: -1` only if
+     something else pins the tracks — without these two the map would take
+     column 1 and the cards column 2. */
+  .p2-cards { grid-column: 1; grid-row: 1; min-width: 0; }
+
+  .p2-map {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    top: calc(var(--header-h) + var(--tabs-h) + 8px);
+    margin-bottom: 0;
+  }
+  /* Fill the viewport below the chrome rather than a guessed pixel height —
+     a taller window should show more map, not more whitespace under it. */
+  .map-canvas { height: calc(100vh - var(--header-h) - var(--tabs-h) - 190px); min-height: 300px; }
+
+  .map-card { margin-bottom: 7px; }
+  .map-ph { padding: 22px 14px; }
+}
+
+/* Room for a wider map without starving the 12-column unit table, which is
+   itself only fully comfortable past this width — the same breakpoint where
+   styles.css takes the attribute trio from two pairs across to three. */
+@media (min-width: 1200px) {
+  .p2-split { grid-template-columns: minmax(0, 1fr) 480px; }
+}
