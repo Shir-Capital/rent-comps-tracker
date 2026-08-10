@@ -46,6 +46,37 @@
 }
 .map-canvas .leaflet-control-attribution { font-size: 10px; }
 
+/* ------------------------------------------------------ Map / Satellite toggle */
+/* A Leaflet control, so it sits INSIDE the map window at the top-right and moves
+   with it. Segmented rather than a checkbox: two named states, one tap each, and
+   the active one is unambiguous — over aerial imagery a subtle "pressed" look
+   would be lost against the photo. */
+.map-basemap {
+  display: flex;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid rgba(15, 23, 42, .25);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, .3);
+}
+.map-basemap button {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 5px 10px;
+  border: 0;
+  background: #fff;
+  color: #334155;
+  cursor: pointer;
+}
+.map-basemap button + button { border-left: 1px solid rgba(15, 23, 42, .15); }
+.map-basemap button:hover { background: #f1f5f9; }
+.map-basemap button.on { background: var(--navy); color: #fff; }
+/* A phone taps this with a thumb, so it gets the height the rest of the app's
+   controls get; desktop can have it back. */
+.map-basemap button { min-height: 30px; }
+@media (min-width: 900px) { .map-basemap button { min-height: 24px; } }
+
 /* --------------------------------------------------------------- the pins */
 /* divIcon markers: pure CSS, no image assets, so Leaflet's icon-path problem
    never arises and the colours are the same variables the cards and pills use. */
