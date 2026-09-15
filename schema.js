@@ -3,10 +3,11 @@
 // Rebuild: python Accessories/build_schema.py
 window.SCHEMA = {
   "compsTab": {
-    "_versionNote": "Bumped v7 -> v8 on 2026-08-08. The COMPS GEOMETRY is identical in v7 and v8 — every row, column, offset and section below is unchanged, and the schema verifies 67/67 against both. What changed in v8 is only what the FEES label cells CONTAIN (they became dropdowns, and five of the eight v7 labels were dropped), which is why fees are routed by `compsLabel` and never by row. `populatorScript` moved to v36 in the same pass: v35 and earlier build their fee map positionally and silently mislabel fees on a v8 workbook, and this string is the command the Export tab tells the analyst to run. Moved again to v37 on 2026-08-10, and that floor is data-bearing rather than cosmetic: export.js emits a `subject_market_rents_by_plan` block and resolves subject column G BY PLAN LABEL, and only v37 consumes it. v36 runs to completion without error on the same payload and silently falls back to bucket-level figures for column G — the per-plan market rents are simply lost, with nothing in the output to say so. Which is the reason this string has to lead the populator and never trail it: a stale hint here is not a wrong version number, it is a silent data loss the analyst cannot see.",
-    "_v9Note": "Bumped v8 -> v9 on 2026-08-10, and this one really is only a stamp. SHIR_MF_Template_v9's entire delta is 274 cells inside COMPS!R3:W76 — a lease-recency window on the INTERNAL comps block (new T4 move-in-after / W4 lookback controls). The comp grid was re-read out of the shipped v9 file for the paste export and is byte-for-byte the v7/v8 geometry: all TEN slots verified identical at row 5 and at row-4 number formats, unit sections still 9 rows, attribute + fee band still 79-87. Nothing downstream changes; populate_comps does not read this string at all, and the app's own geometry asserts pass unchanged.",
-    "templateVersion": "SHIR_MF_Template_v9",
-    "populatorScript": "rent-comp-data-populator-populate_comps-v37.py",
+    "_v44Note": "Bumped v9 -> v44 on 2026-09-15 (the schema had gone stale across v10-v43; populate_comps-v44.py's own geometry dispatcher was already fixed for the independent bands, this file and the two scripts that build/verify it were not). Two structural changes: (1) attrRowFirst/attrRowLast (one shared span) is RETIRED — replaced with physRowFirst/physRowLast, amenRowFirst/amenRowLast, and a Mandatory-only feeRowFirst/feeRowLast/feeSumLastRow, each resolved independently, matching populate_comps-v44.py's _resolve_bands_new(). (2) the FEES vocabulary is settled against the template's OWN dropdown (read via openpyxl data_validations, not assumed): only 5 of its 12 options route to a real dollar fee (Amenity, Cable/Internet, Cleaning, V Trash, Trash) — Insurance/Pest/Parking/Utilities/W-D are NOT on the v44 dropdown at all; they were redesigned as Y/N or allocation-flag AMENITY items ('Insurance Required', the Parking sub-band, 'Property Allocated Expenses' Tenant Water/Gas/Electric/Cable). Those five keys are demoted to tracker-only (compsLabel removed) in `fees` below, same treatment app_fee/admin_fee/pet_rent/pet_deposit already had. Also: rowTotals moved 76->176, rowCompType 77->177, rowAttrHeader 78->199 (unit sections grew from 9 to up to 24 rows each — verified live against every unit bucket's subtotal row, not assumed), and the paste-export regions (`pasteMap.regions`) are widened from row 87 to row 269 — the old bound silently excluded roughly two-thirds of the comp block (everything from the widened unit sections through the whole attribute/amenity/fee area). Verified against the live SHIR_MF_Template_v44.xlsx; `verify_against_template.py` needed NO code changes for any of this (it already resolves rows from the JSON rather than assuming a shared span) — only comps_schema.json's data and build_schema.py's internal-consistency checks did.",
+    "_versionNote": "Historical, pre-v44: bumped v7 -> v8 on 2026-08-08. The COMPS GEOMETRY was identical in v7 and v8 — every row, column, offset and section was unchanged, and the schema verified 67/67 against both. What changed in v8 was only what the FEES label cells CONTAIN (they became dropdowns, and five of the eight v7 labels were dropped), which is why fees are routed by `compsLabel` and never by row. `populatorScript` moved to v36 in the same pass, then v37 on 2026-08-10 (per-plan subject market rents). Superseded by the v44 band rebuild above — kept for the fee-routing-by-label history, not as current geometry.",
+    "_v9Note": "Historical: bumped v8 -> v9 on 2026-08-10, a pure stamp — SHIR_MF_Template_v9's entire delta was 274 cells inside COMPS!R3:W76 (a lease-recency window on the INTERNAL comps block), byte-identical COMPS geometry otherwise. Superseded by v44 above.",
+    "templateVersion": "SHIR_MF_Template_v44",
+    "populatorScript": "rent-comp-data-populator-populate_comps-v44.py",
     "compBaseCols": [
       25,
       34,
@@ -32,18 +33,30 @@ window.SCHEMA = {
       97,
       106
     ],
-    "reservedSlotNote": "The v7 COMPS tab has ten comp slots (through DB), but slots 9-10 (CS, DB) are deliberately never populated: populate_comps v34/v35 read their pristine offset-0 columns as the reference for restoring unit line-# serials a pre-v34 run clobbered. Filling them destroys that reference, so maxComps stays 8.",
+    "reservedSlotNote": "The COMPS tab has ten comp slots (through DB), but slots 9-10 (CS, DB) are deliberately never populated: populate_comps v34+ read their pristine offset-0 columns as the reference for restoring unit line-# serials a pre-v34 run clobbered. Filling them destroys that reference, so maxComps stays 8. Unaffected by the v41 band rebuild.",
     "rowHeader": 3,
     "rowDetails": 4,
     "rowColHeaders": 5,
-    "rowTotals": 76,
-    "rowCompType": 77,
-    "rowAttrHeader": 78,
-    "attrRowFirst": 79,
-    "attrRowLast": 87,
-    "feeRowFirst": 79,
-    "feeRowLast": 86,
-    "feeSumLastRow": 87,
+    "rowTotals": 176,
+    "rowCompType": 177,
+    "rowAttrHeader": 199,
+    "_bandNote": "The three attribute bands share their header row (199) and first data row (200) but are INDEPENDENTLY SIZED below that — never derive one band's span from another's. Resolved live against SHIR_MF_Template_v44.xlsx via populate_comps-v44.py's own resolve_comps_geometry(), not re-derived by hand.",
+    "physRowFirst": 200,
+    "physRowLast": 223,
+    "amenRowFirst": 200,
+    "amenRowLast": 269,
+    "feeMandatoryHeaderRow": 200,
+    "feeRowFirst": 201,
+    "feeRowLast": 205,
+    "feeSumLastRow": 205,
+    "_feeSumLastRowNote": "Unlike v7-v9 (feeSumLastRow = feeRowLast + 1, an unlabelled row past the last printed label that the Eff. $/Mo SUM still covered), v44's Mandatory band has no trailing unlabelled row: all 5 rows (3 pre-labelled + 2 blank-but-labelable via the dropdown) are inside 201-205, and the Eff. $/Mo formula sums exactly that range — confirmed against the live SUM($AF$201:$AF$205) formula.",
+    "feeOptionalHeaderRow": 206,
+    "feeOptionalFirst": 207,
+    "feeOptionalLast": 211,
+    "feeOneTimeHeaderRow": 212,
+    "feeOneTimeFirst": 213,
+    "feeOneTimeLast": 215,
+    "_feeOptionalOneTimeNote": "Optional Fees (207-211, same 12-item dropdown as Mandatory) and One-Time Fees (213-215, fixed pre-printed labels: Application Fee / Admin Fee / Pet Deposit, no dropdown) exist on the template but do NOT feed Eff. $/Mo and are out of scope for this pass — `fees` below still treats app_fee/admin_fee/pet_deposit as tracker-only, same as pre-v44. Recorded here only so a future pass does not have to re-resolve these rows from scratch.",
     "subjectMktRentCol": 7,
     "subjectUnitCountCol": 3,
     "offsets": {
@@ -73,9 +86,10 @@ window.SCHEMA = {
       "amenityValue": 5,
       "feeLabel": 6,
       "feeValue": 7
-    }
+    },
+    "_offsetsNote": "Every offset above is UNCHANGED across v9 -> v44 — confirmed live (row 4 number formats, OFFSET_PHYS=2 / OFFSET_AMEN=5 in populate_comps-v44.py, and the row-3 comp-name convention all matched byte-for-byte between SHIR_MF_Template_v35 and v44). Only the ROW numbers each offset lands on moved."
   },
-  "_pasteMapNote": "The paste-ready export (paste-export.js) mirrors the COMPS tab positionally and is pasted back with Paste Special -> Values -> [x] Skip blanks, so a cell we leave EMPTY is a cell the paste cannot touch. This block is the list of cells it is allowed to fill; everything else on the tab is a formula, a template-owned serial, or a subtotal. Read out of SHIR_MF_Template_v9.xlsx on 2026-08-10, all ten slots verified. Three facts this depends on: (1) COMPS row 2 is a LIVE column-index chain (A2=1, B2=A2+1, ...) so nothing may ever anchor above row 3; (2) rows 3-87 hold exactly two merged ranges, J3:P3 and R3:S3, and Y3:DJ87 has NONE, which is what lets the whole comp grid go across as one rectangle; (3) unit-row offsets 1-4 are contiguous inputs while 0 (line serial) and 5-7 (Ask $/SF, Eff. $/Mo, Eff. $/SF) are not. Offsets are named, never numbered, so a template that moves one is caught by build_schema.py rather than by a wrong number in a model.",
+  "_pasteMapNote": "The paste-ready export (paste-export.js) mirrors the COMPS tab positionally and is pasted back with Paste Special -> Values -> [x] Skip blanks, so a cell we leave EMPTY is a cell the paste cannot touch. This block is the list of cells it is allowed to fill; everything else on the tab is a formula, a template-owned serial, or a subtotal. Row bound widened 87 -> 269 for v44 (verified: zero merged cells and zero content below row 269 in either the comp columns Y:DJ or the subject columns B:H) — the old row-87 bound predates the v41 band rebuild and silently excluded most of the unit sections (which now run through row 176) plus the entire attribute/amenity/fee area (177-269). Three facts this depends on, unchanged by the rebuild: (1) COMPS row 2 is a LIVE column-index chain (A2=1, B2=A2+1, ...) so nothing may ever anchor above row 3; (2) row 3 holds two merged ranges (J3:P3 and R3:S3), both outside both paste regions' columns; (3) unit-row offsets 1-4 are contiguous inputs while 0 (line serial) and 5-7 (Ask $/SF, Eff. $/Mo, Eff. $/SF) are not.",
   "pasteMap": {
     "sheetName": "COMPS_PASTE",
     "dashSheetName": "DASH_PASTE",
@@ -85,7 +99,7 @@ window.SCHEMA = {
         "key": "comps",
         "name": "PASTE_COMPS",
         "sheet": "COMPS_PASTE",
-        "range": "$Y$3:$DJ$87",
+        "range": "$Y$3:$DJ$269",
         "anchor": "Y3",
         "default": true,
         "label": "All 8 comps — names, row 4, unit rows, type/source, attributes, fees"
@@ -94,7 +108,7 @@ window.SCHEMA = {
         "key": "subject",
         "name": "PASTE_SUBJECT",
         "sheet": "COMPS_PASTE",
-        "range": "$B$3:$H$87",
+        "range": "$B$3:$H$269",
         "anchor": "B3",
         "default": true,
         "label": "Subject — W/D, utilities, and per-plan market rents in column G"
@@ -150,7 +164,7 @@ window.SCHEMA = {
         7
       ]
     },
-    "_neverWriteNote": "Asserted in build_schema.py against compsTab.offsets rather than restated as numbers: row 4 offsets totalUnits (=Z76) and concessionPct are formulas; unit-row offsets unitRowNum, unitAskPsf, unitEffRent and unitEffPsf are the template's serial and its three derived columns; every offset of every subtotal row and of rowTotals is a formula. Subject side, only E4/G4/H4 and G6:G75 are inputs — B is an array formula and C/D/F/H are formulas.",
+    "_neverWriteNote": "Asserted in build_schema.py against compsTab.offsets rather than restated as numbers: row 4 offsets totalUnits (=Z176 on v44) and concessionPct are formulas; unit-row offsets unitRowNum, unitAskPsf, unitEffRent and unitEffPsf are the template's serial and its three derived columns; every offset of every subtotal row and of rowTotals is a formula. Subject side, only E4/G4/H4 and G6:G175 are inputs — B is an array formula and C/D/F/H are formulas.",
     "dashCells": [
       {
         "row": 5,
@@ -183,7 +197,7 @@ window.SCHEMA = {
         "label": "Year built"
       }
     ],
-    "_dashNote": "DASH!E5:E9 are typed constants in v9. E10 (units) is =IF(OR(RR!E365=\"\",RR!E365=0),1,RR!E365) and E18 (occupancy) is =RR!J355 — both formulas, both inside no paste range, and both additionally protected by skip-blanks. Basics!C3:D11 mirrors all of this off DASH, so DASH is the only place to write."
+    "_dashNote": "DASH!E5:E9 are typed constants. E10 (units) is =IF(OR(RR!E365=\"\",RR!E365=0),1,RR!E365) and E18 (occupancy) is =RR!J355 — both formulas, both inside no paste range, and both additionally protected by skip-blanks. Basics!C3:D11 mirrors all of this off DASH, so DASH is the only place to write."
   },
   "unitBuckets": [
     {
@@ -192,8 +206,8 @@ window.SCHEMA = {
       "short": "Eff",
       "compsLabel": "+Eff",
       "startRow": 6,
-      "endRow": 14,
-      "subtotalRow": 15,
+      "endRow": 24,
+      "subtotalRow": 25,
       "beds": 0,
       "baths": 1
     },
@@ -202,9 +216,9 @@ window.SCHEMA = {
       "label": "1BR / 1BA",
       "short": "1x1",
       "compsLabel": "+1/1(.5)",
-      "startRow": 16,
-      "endRow": 24,
-      "subtotalRow": 25,
+      "startRow": 26,
+      "endRow": 49,
+      "subtotalRow": 50,
       "beds": 1,
       "baths": 1
     },
@@ -213,9 +227,9 @@ window.SCHEMA = {
       "label": "2BR / 1BA",
       "short": "2x1",
       "compsLabel": "+2x1(.5)",
-      "startRow": 26,
-      "endRow": 34,
-      "subtotalRow": 35,
+      "startRow": 51,
+      "endRow": 74,
+      "subtotalRow": 75,
       "beds": 2,
       "baths": 1
     },
@@ -224,9 +238,9 @@ window.SCHEMA = {
       "label": "2BR / 2BA",
       "short": "2x2",
       "compsLabel": "+2x2(.5)",
-      "startRow": 36,
-      "endRow": 44,
-      "subtotalRow": 45,
+      "startRow": 76,
+      "endRow": 99,
+      "subtotalRow": 100,
       "beds": 2,
       "baths": 2
     },
@@ -235,9 +249,9 @@ window.SCHEMA = {
       "label": "3BR / 1BA",
       "short": "3x1",
       "compsLabel": "+3/1(.5)",
-      "startRow": 46,
-      "endRow": 54,
-      "subtotalRow": 55,
+      "startRow": 101,
+      "endRow": 124,
+      "subtotalRow": 125,
       "beds": 3,
       "baths": 1
     },
@@ -246,9 +260,9 @@ window.SCHEMA = {
       "label": "3BR / 2BA",
       "short": "3x2",
       "compsLabel": "+3/2(.5)",
-      "startRow": 56,
-      "endRow": 64,
-      "subtotalRow": 65,
+      "startRow": 126,
+      "endRow": 149,
+      "subtotalRow": 150,
       "beds": 3,
       "baths": 2
     },
@@ -257,122 +271,130 @@ window.SCHEMA = {
       "label": "4BR / 2BA",
       "short": "4x2",
       "compsLabel": "+4/2(.5)",
-      "startRow": 66,
-      "endRow": 74,
-      "subtotalRow": 75,
+      "startRow": 151,
+      "endRow": 174,
+      "subtotalRow": 175,
       "beds": 4,
       "baths": 2
     }
   ],
+  "_unitBucketsNote": "Rows widened on SHIR_MF_Template_v41 (efficiency 19 data rows, the rest 24 each — the efficiency section cannot hold as many as the others; unchanged since). compsLabel text (+Eff, +1/1(.5), ...) and subtotalRow = endRow + 1 are unchanged from v9 — verified live at rows 25/50/75/100/125/150/175 on v44.",
+  "_physicalNote": "These 9 keys are UNCHANGED since v9 — same internal key, same display label, same populate_comps.py logic. What moved is only the ROW: on v44 they live inside the Physical band's 'Unit Systems' sub-group (rows 207-215) rather than being the whole Physical block (which is now 200-223 and also carries a 'Building' sub-group — Property Type/Stories/Residential Buildings/Renovated - Year/Renovated - Scope — and 'Terms'/'Location' sub-groups the tracker does not populate). Rows resolved live via populate_comps-v44.py's own resolve_comps_geometry(), not re-derived by hand.",
   "physical": [
     {
       "key": "hvac_indiv",
       "label": "HVAC Indiv.",
-      "row": 79,
+      "row": 207,
       "hellodata": "central_air_conditioning"
     },
     {
       "key": "wd_inunit",
       "label": "W/D In-Unit",
-      "row": 80,
+      "row": 208,
       "hellodata": "washer_dryer_in_unit"
     },
     {
       "key": "wd_hookups",
       "label": "W/D Hookups",
-      "row": 81,
+      "row": 209,
       "hellodata": "washer_dryer_hookups"
     },
     {
       "key": "water_util",
       "label": "Water Util.",
-      "row": 82,
+      "row": 210,
       "hellodata": null
     },
     {
       "key": "gas_util",
       "label": "Gas Util.",
-      "row": 83,
+      "row": 211,
       "hellodata": null
     },
     {
       "key": "elec_util",
       "label": "Elec. Util.",
-      "row": 84,
+      "row": 212,
       "hellodata": null
     },
     {
       "key": "roof_type",
       "label": "Roof Type",
-      "row": 85,
+      "row": 213,
       "hellodata": null
     },
     {
       "key": "priv_yards",
       "label": "Priv. Yards",
-      "row": 86,
+      "row": 214,
       "hellodata": "patio_or_balcony"
     },
     {
       "key": "indiv_hwh",
       "label": "Indiv. HWH",
-      "row": 87,
+      "row": 215,
       "hellodata": null
     }
   ],
+  "_amenitiesNote": "v44's Amenities band replaced the old 9-item vocabulary with a 59-item one (11 sub-groups); it is NOT a superset of the v9 list. These 9 keys are the same crosswalk populate_comps-v44.py's AMENITY_LABEL_MAP uses: 7 map cleanly to a same-meaning v44 label at a new row, 2 are LOSSY (flagged with `lossy: true` and a `note`) — `pool` used to be a Y/N and is now a COUNT ('# of Pools'; a truthy flag writes 1, a floor, not a reading), and `sport_court` now names one specific court type out of three the new vocabulary splits out (Basketball / Volleyball / # of Tennis Courts). Rows are NOT contiguous — they are scattered across the 70-row band interleaved with the ~50 amenity items and 11 sub-group headers this schema does not track — so build_schema.py validates them by band-membership and uniqueness, never by a fixed anchor + index.",
   "amenities": [
     {
       "key": "fitness_center",
-      "label": "Fitness Center",
-      "row": 79,
+      "label": "Fitness Room / Gym",
+      "row": 208,
       "hellodata": "fitness_center"
     },
     {
       "key": "clubhouse",
-      "label": "Clubhouse",
-      "row": 80,
+      "label": "Clubroom",
+      "row": 206,
       "hellodata": "club_house_party_room"
     },
     {
       "key": "business_center",
       "label": "Business Center",
-      "row": 81,
+      "row": 241,
       "hellodata": "business_center"
     },
     {
       "key": "pool",
-      "label": "Pool",
-      "row": 82,
-      "hellodata": "swimming_pool"
+      "label": "# of Pools",
+      "row": 215,
+      "hellodata": "swimming_pool",
+      "lossy": true,
+      "valueType": "count",
+      "note": "v44 changed this from a Y/N amenity to a pool COUNT. A truthy HelloData flag writes 1 (a floor on the real count, not a reading), never 'Y'."
     },
     {
       "key": "dog_park",
       "label": "Dog Park",
-      "row": 83,
+      "row": 207,
       "hellodata": "dog_park"
     },
     {
       "key": "bbq_grill",
-      "label": "BBQ/Grill Area",
-      "row": 84,
+      "label": "Grill(s)",
+      "row": 209,
       "hellodata": "barbecue_grill"
     },
     {
       "key": "gated",
-      "label": "Gated Access",
-      "row": 85,
+      "label": "Access Gates (Driving)",
+      "row": 261,
       "hellodata": "gated_community_access"
     },
     {
       "key": "sport_court",
-      "label": "Sport Court",
-      "row": 86,
-      "hellodata": "basketball_court"
+      "label": "Basketball Court",
+      "row": 205,
+      "hellodata": "basketball_court",
+      "lossy": true,
+      "note": "v44 splits the old generic 'Sport Court' three ways (Basketball Court / Volleyball / # of Tennis Courts); this key routes to Basketball Court only."
     },
     {
       "key": "playground",
       "label": "Playground",
-      "row": 87,
+      "row": 212,
       "hellodata": "playground"
     }
   ],
@@ -574,7 +596,7 @@ window.SCHEMA = {
       "key": "concession_amount",
       "label": "Conc $",
       "type": "number",
-      "note": "One-time concession, row 4 offset 4. Feeds the R111:W123 roll-up and the Suggested Subject Concession."
+      "note": "One-time concession, row 4 offset 4. Feeds the concession roll-up and the Suggested Subject Concession."
     },
     {
       "key": "wd_type",
@@ -623,10 +645,10 @@ window.SCHEMA = {
       "label": "Reno Level",
       "type": "select",
       "options_ref": "renoLevels",
-      "note": "Tracker-only — v7 has no per-comp reno cell (offset 7 is the utility structure)."
+      "note": "Tracker-only — the populator has no per-comp reno cell to write this to (v44 added 'Renovated - Year'/'Renovated - Scope' physical cells at rows 204-205, but the populator does not yet write them)."
     }
   ],
-  "_feeVocabularyNote": "The 12 options template v8 put in the FEES label dropdowns, identical in the MF and ExStay families. Validation constrains humans typing, NOT programmatic writes — openpyxl and COM can still put any string in those cells — so anything reading or writing the fee band must know this list separately. `Storm water admin` is the corrected spelling; the audit sheet was marked KEEP on the misspelling `Storm watet admin`, which survives on exactly one live cell (Lantern COMPS!BX84) and no longer validates.",
+  "_feeVocabularyNote": "The 12 options the FEES label dropdowns offer, identical across the Mandatory (201-205) and Optional (207-211) sub-bands and unchanged from v8 through the live v44 template (re-read directly off v44's own data validations, not assumed). Validation constrains humans typing, NOT programmatic writes — openpyxl and COM can still put any string in those cells — so anything reading or writing the fee band must know this list separately. `Storm water admin` is the corrected spelling; the audit sheet was marked KEEP on the misspelling `Storm watet admin`, which survives on exactly one live cell (Lantern COMPS!BX84, a pre-v41 workbook) and does not validate on any current dropdown.",
   "feeVocabulary": [
     "Amenity",
     "Cable/Internet",
@@ -641,63 +663,67 @@ window.SCHEMA = {
     "Storm water admin",
     "Water admin"
   ],
-  "_feesNote": "A fee's COMPS identity is its LABEL, never its row. `compsLabel` is the text that must appear in a comp block's FEES label column (offset 6) for that fee's value to be written at offset 7. Template v7 pre-printed 8 labels at rows 79-86; v8 (2026-08-07) made those cells DROPDOWNS, kept only Amenity / Cable-Internet / Cleaning pre-selected, and dropped Insurance / Pest / Parking / Utilities / W-D from the list entirely. So the row a label sits on differs by template version AND by comp — analysts free-type, and one live deal (Lantern) has `V Trash` on comp 2 row 86 while comp 1 still has the v7 defaults on the same rows. Anything keyed to a row number mislabels silently, and the fee column is summed into every unit's Eff. $/Mo. Keys with no compsLabel are tracker-only: one-time or optional charges with no cell in the template.",
+  "_feesNote": "A fee's COMPS identity is its LABEL, never its row. `compsLabel` is the text that must appear in a comp block's FEES label column (offset 6) for that fee's value to be written at offset 7, and it is only ever checked against the Mandatory sub-band (feeRowFirst..feeSumLastRow = 201-205 on v44) — Optional and One-Time never reach Eff. $/Mo. v44 SETTLED the vocabulary against the template's own dropdown: only 5 of its 12 options route to a real payload key (amenity, cable_internet, cleaning, valet_trash, trash — exactly the non-null entries of populate_comps-v44.py's FEE_LABEL_TO_KEY for this vocabulary). `insurance`/`pest`/`parking`/`utilities`/`wd` are NOT on the v44 dropdown at all — those concepts were redesigned as Y/N or allocation-flag AMENITY items ('Insurance Required', the 'Parking' sub-band, 'Property Allocated Expenses' Tenant Water/Gas/Electric/Cable) — so those five keys are demoted here to tracker-only (compsLabel removed), the same treatment app_fee/admin_fee/pet_rent/pet_deposit already had. They remain live keys on the record (a pre-v41 workbook's populator run still routes them via FEE_LABEL_TO_KEY's legacy branch) but this schema — which describes the CURRENT v44 template — no longer claims they reach a COMPS cell.",
   "fees": [
     {
       "key": "amenity",
       "label": "Amenity",
       "type": "number",
-      "compsLabel": "Amenity",
-      "row": "tfee1"
-    },
-    {
-      "key": "insurance",
-      "label": "Insurance",
-      "type": "number",
-      "compsLabel": "Insurance",
-      "row": "tfee1"
-    },
-    {
-      "key": "pest",
-      "label": "Pest",
-      "type": "number",
-      "compsLabel": "Pest",
-      "row": "tfee2"
-    },
-    {
-      "key": "parking",
-      "label": "Parking",
-      "type": "number",
-      "compsLabel": "Parking",
-      "row": "tfee2"
+      "compsLabel": "Amenity"
     },
     {
       "key": "cleaning",
       "label": "Cleaning",
       "type": "number",
-      "compsLabel": "Cleaning",
-      "row": "tfee3"
+      "compsLabel": "Cleaning"
     },
     {
       "key": "cable_internet",
       "label": "Cable/Internet",
       "type": "number",
-      "compsLabel": "Cable/Internet",
-      "row": "tfee3"
+      "compsLabel": "Cable/Internet"
+    },
+    {
+      "key": "trash",
+      "label": "Trash / Mo",
+      "type": "number",
+      "compsLabel": "Trash"
+    },
+    {
+      "key": "valet_trash",
+      "label": "Valet Trash / Mo",
+      "type": "number",
+      "compsLabel": "V Trash"
+    },
+    {
+      "key": "insurance",
+      "label": "Insurance",
+      "type": "number",
+      "note": "Tracker-only as of v44 — not on the FEES dropdown; the template's own 'Insurance Required' amenity Y/N flag covers this now."
+    },
+    {
+      "key": "pest",
+      "label": "Pest",
+      "type": "number",
+      "note": "Tracker-only as of v44 — dropped from the FEES dropdown, no v44 replacement cell."
+    },
+    {
+      "key": "parking",
+      "label": "Parking",
+      "type": "number",
+      "note": "Tracker-only as of v44 — not on the FEES dropdown; the template's own 'Parking' amenity sub-band (Assigned/Attached Garage/Covered/etc.) covers this now."
     },
     {
       "key": "utilities",
       "label": "Utilities",
       "type": "number",
-      "compsLabel": "Utilities",
-      "row": "tfee4"
+      "note": "Tracker-only as of v44 — not on the FEES dropdown; the template's own 'Property Allocated Expenses' amenity items (Tenant Water/Gas/Electric/Cable) cover this now."
     },
     {
       "key": "wd",
       "label": "W/D",
       "type": "number",
-      "compsLabel": "W/D",
-      "row": "tfee4"
+      "note": "Tracker-only as of v44 — not on the FEES dropdown; the template's own W/D In-Unit / W/D Hookups physical attributes cover this now."
     },
     {
       "key": "app_fee",
@@ -718,18 +744,6 @@ window.SCHEMA = {
       "key": "pet_deposit",
       "label": "Pet Deposit",
       "type": "number"
-    },
-    {
-      "key": "trash",
-      "label": "Trash / Mo",
-      "type": "number",
-      "compsLabel": "Trash"
-    },
-    {
-      "key": "valet_trash",
-      "label": "Valet Trash / Mo",
-      "type": "number",
-      "compsLabel": "V Trash"
     },
     {
       "key": "other",
