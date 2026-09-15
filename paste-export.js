@@ -16,13 +16,14 @@
    in the template carries our value; a cell that is a formula, a subtotal, a
    template-owned serial or simply unknown is left EMPTY. Pasted with
        Paste Special -> Values -> [x] Skip blanks
-   every empty cell is a no-op, so the whole Y3:DJ87 grid crosses in one action
-   and not one formula is touched.
+   every empty cell is a no-op, so the whole comp grid (Y3:DJ269 on the current
+   template) crosses in one action and not one formula is touched.
 
    This is the only layout the template actually permits. Inputs interleave with
    formulas both horizontally (unit-row offsets 1-4 are inputs, 5-7 are the
-   derived $/SF and Eff. columns) and vertically (the subtotal rows 15/25/.../75
-   sit inside the unit bands), so no contiguous rectangle of pure inputs bigger
+   derived $/SF and Eff. columns) and vertically (the subtotal rows sit inside
+   the unit bands — 25/50/.../175 on the current template), so no contiguous
+   rectangle of pure inputs bigger
    than 9x4 exists anywhere on the tab. Without skip-blanks the same job is 56
    separate pastes.
 
@@ -116,10 +117,18 @@ function pxIsWritable(row, col) {
   if (row === TAB.rowCompType) {
     return ['compTypeValue', 'compSourceValue'].some(n => isOff('compType', n));
   }
-  if (row >= TAB.attrRowFirst && row <= TAB.attrRowLast) {
-    return ['physicalValue', 'amenityValue', 'feeLabel', 'feeValue']
-      .some(n => isOff('attr', n));
-  }
+  /* v41+: Physical / Amenities / FEES share a start row but are INDEPENDENTLY
+     SIZED below that (Physical 200-223, Amenities 200-269, FEES 200-217 —
+     Mandatory 201-205 only). They are checked as three separate bands, never
+     as one combined attrRowFirst..attrRowLast span (retired) — that shared
+     span is exactly the assumption that broke populate_comps-v43 against this
+     template. The bands overlap in row-space by design; the column offset
+     (isOff) is what actually disambiguates which field a cell belongs to. */
+  const inPhys = row >= TAB.physRowFirst && row <= TAB.physRowLast && isOff('attr', 'physicalValue');
+  const inAmen = row >= TAB.amenRowFirst && row <= TAB.amenRowLast && isOff('attr', 'amenityValue');
+  const inFee = row >= TAB.feeRowFirst && row <= TAB.feeRowLast &&
+    (isOff('attr', 'feeLabel') || isOff('attr', 'feeValue'));
+  if (inPhys || inAmen || inFee) return true;
   const inSection = BUCKETS.some(b => row >= b.startRow && row <= b.endRow);
   if (inSection) {
     return ['unitCount', 'unitSf', 'unitOccPct', 'unitAskRent'].some(n => isOff('unit', n));
@@ -273,7 +282,19 @@ function pxBuildMirror(tgt) {
     });
 
     PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, c.physical[pa.key] || '', who, pa.label));
-    AMENITIES.forEach(am => put(am.row, base + off.amenityValue, c.amenities[am.key] || '', who, am.label));
+    AMENITIES.forEach(am => {
+      let v = c.amenities[am.key] || '';
+      /* v44: '# of Pools' is a COUNT column, not Y/N — the app's own toggle is
+         still a three-state Y/N/blank control (schema.amenities carries no
+         separate input type), so the lossy conversion has to happen here on
+         the way out. Mirrors populate_comps-v44.py's identical transform for
+         this same amenity (module docstring: 'Y writes 1 — a floor, not a
+         reading'). A blank stays blank rather than becoming a false 0 — an
+         unresearched amenity is not a confirmed zero. Every other amenity and
+         every physical attribute is unaffected and still writes Y/N/blank. */
+      if (am.valueType === 'count' && v !== '') v = (v === 'Y') ? 1 : 0;
+      put(am.row, base + off.amenityValue, v, who, am.label);
+    });
 
     // ---- FEES: a fee's identity is its LABEL, never its row ---------------
     const fees = (SCHEMA.fees || []).filter(f => f.compsLabel &&
@@ -425,7 +446,12 @@ function pxReadTarget(buf, fileName) {
     slotNames[i] = nm;
     if (nm) slotByName[pxNorm(nm)] = i;
     const labels = {};
-    for (let r = TAB.attrRowFirst; r <= TAB.attrRowLast; r++) {
+    /* Fee labels live only in the FEES Mandatory band (feeRowFirst..feeRowLast
+       = 201-205 on v44) — scanning the old shared attrRowFirst..attrRowLast
+       span would also walk Physical/Amenities rows that never carry a fee
+       label at this column and cost nothing extra, but the fee band is the
+       only span with actual meaning here now that the three bands diverge. */
+    for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
       const lb = pxS(ws, r, base + off.feeLabel);
       if (lb) labels[r] = lb;
     }
@@ -510,7 +536,7 @@ async function pxBuildWorkbook(mirror) {
       + 'Without that tick the paste will destroy the subtotal rows, the Eff. $/Mo columns and column B’s array formula. It is not optional.', true);
     line('IT CANNOT CLEAR', 'A paste can set and overwrite but never empty a cell. If a comp slot already holds data, do the CLEAR FIRST sheet first.', true);
     ws.addRow([]);
-    line('Built against', TAB.templateVersion || 'SHIR_MF_Template_v9');
+    line('Built against', TAB.templateVersion || 'SHIR_MF_Template_v44');
     line('Mode', mirror.aligned
       ? 'ALIGNED to ' + mirror.tgt.fileName + ' — fee rows and subject plan rows resolved against that workbook'
       : 'GENERIC — no workbook attached. Per-plan market rents are NOT written and fee labels use the template default rows.');
@@ -553,16 +579,23 @@ async function pxBuildWorkbook(mirror) {
      back over themselves for no reason. Column A instead carries a read-only
      spine so a human scrolling this sheet can see which row is which. It sits
      outside every named range. */
-  ws.getCell(TAB.rowHeader, 1).value = 'row 3 — names';
-  ws.getCell(TAB.rowDetails, 1).value = 'row 4 — details';
+  ws.getCell(TAB.rowHeader, 1).value = 'row ' + TAB.rowHeader + ' — names';
+  ws.getCell(TAB.rowDetails, 1).value = 'row ' + TAB.rowDetails + ' — details';
   BUCKETS.forEach(b => {
     ws.getCell(b.startRow, 1).value = b.short + ' rows ' + b.startRow + '-' + b.endRow;
     ws.getCell(b.subtotalRow, 1).value = '(subtotal — never written)';
   });
   ws.getCell(TAB.rowTotals, 1).value = '(Tot./Avg. — never written)';
-  ws.getCell(TAB.rowCompType, 1).value = 'row 77 — type/source';
-  ws.getCell(TAB.attrRowFirst, 1).value = 'attrs / amenities / fees';
-  for (let r = 1; r <= TAB.attrRowLast; r++) {
+  ws.getCell(TAB.rowCompType, 1).value = 'row ' + TAB.rowCompType + ' — type/source';
+  /* v41+: three independently-sized bands, not one — labelled separately so
+     the spine reflects what is actually on the tab instead of a single stale
+     range. Physical/Amenities/FEES all start together (row 200) but end at
+     different rows (223 / 269 / 217, FEES Mandatory sums only 201-205). */
+  ws.getCell(TAB.physRowFirst, 1).value = 'Physical ' + TAB.physRowFirst + '-' + TAB.physRowLast +
+    ' / Amenities ' + TAB.amenRowFirst + '-' + TAB.amenRowLast +
+    ' / FEES (Mandatory) ' + TAB.feeRowFirst + '-' + TAB.feeRowLast;
+  const spineLast = Math.max(TAB.physRowLast || 0, TAB.amenRowLast || 0, TAB.feeRowLast || 0);
+  for (let r = 1; r <= spineLast; r++) {
     const c = ws.getCell(r, 1);
     if (c.value != null && r !== 1) c.font = { name: BRAND.font || 'Arial Narrow', size: 9, italic: true, color: { argb: 'FF64748B' } };
   }
