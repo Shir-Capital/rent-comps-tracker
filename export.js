@@ -265,16 +265,17 @@ function buildPopulatorPayload() {
   return {
     skill_chain: 'rent-comps-tracker -> rent-comp-data-populator (populate_comps.py --skip-fetch)',
     generator: 'rent-comps-tracker',
-    /* Geometry stamp — v7 keeps the 9-col stride from Y but moved the attribute
-       band up to 79-87 and shrank every unit section to 9 rows. A v30-or-earlier
-       populator hardcodes the v3 rows and writes amenities into the photo band. */
-    template_version: TAB.templateVersion || 'SHIR_MF_Template_v8',
+    /* Geometry stamp — v41+ (live: v44) rebuilt the shared 9-row attribute band into
+       three independently-sized Physical/Amenities/FEES bands; v3-v40 (and every
+       current ExStay template) still share one 9-row band. populate_comps-v44.py's
+       own dispatcher resolves either from the workbook's labels — see its module
+       docstring. An older populator (v43 and before) correctly REFUSES to write a
+       v41+ workbook rather than write to the wrong rows. */
+    template_version: TAB.templateVersion || 'SHIR_MF_Template_v44',
     /* Keep this fallback at the CURRENT floor, not the historical one. It fires only
        when schema.js failed to load, and a stale value here is the one failure the
-       analyst cannot see: v36 consumes this payload without error and silently
-       substitutes bucket averages for the per-plan `subject_market_rents_by_plan`
-       rents below. Bump it in lockstep with comps_schema.json. */
-    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v37.py',
+       analyst cannot see. Bump it in lockstep with comps_schema.json. */
+    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v44.py',
     generated_at: nowISO(),
     generated_by: (CURRENT_USER && CURRENT_USER.email) || '',
     property_url: APP_BASE_URL + propertyHash(STATE).replace(/^#/, '#'),
@@ -625,7 +626,7 @@ async function buildCompsWorkbook() {
   {
     const ws = wb.addWorksheet('COMPS Cell Map');
     const heads = ['Cell', 'Row', 'Col', 'Belongs To', 'Field', 'Value'];
-    titleRow(ws, `COMPS TAB CELL MAP — what ${TAB.populatorScript || 'populate_comps'} writes — ${TAB.templateVersion || 'SHIR_MF_Template_v8'}`, heads.length);
+    titleRow(ws, `COMPS TAB CELL MAP — what ${TAB.populatorScript || 'populate_comps'} writes — ${TAB.templateVersion || 'SHIR_MF_Template_v44'}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
@@ -865,7 +866,7 @@ function renderPhase4() {
         ${order || '<div class="muted small">No comps to place.</div>'}
         <hr class="hr-soft"/>
         <div class="kv"><span class="k">Sections priced (col G)</span><span class="v">${rents.filter(r => r.effective > 0).length}/${BUCKETS.length}</span></div>
-        <div class="kv"><span class="k">Target</span><span class="v">${esc(TAB.templateVersion)} · rows ${esc(TAB.rowHeader)}–${esc(TAB.attrRowLast)}</span></div>
+        <div class="kv"><span class="k">Target</span><span class="v">${esc(TAB.templateVersion)} · rows ${esc(TAB.rowHeader)}–${esc(TAB.amenRowLast)}</span></div>
         ${TAB.templateSlots > MAX_COMPS ? `<div class="tiny muted" style="margin-top:6px">
           The COMPS tab has ${esc(TAB.templateSlots)} comp slots, but the last
           ${esc(TAB.templateSlots - MAX_COMPS)} (cols ${esc((TAB.templateSlotBaseCols || []).slice(MAX_COMPS).map(colLetter).join(', '))})
@@ -900,26 +901,21 @@ function renderPhase4() {
       <div class="card-head"><span class="grow">Then, on a machine with the proforma</span></div>
       <div class="card-body">
         <div class="muted small">Run the proven populator against the deal's proforma:</div>
-        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comp Data Populator Skill\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v37.py')}" ^
+        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comps Unified Skill\\scripts\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v44.py')}" ^
   "&lt;proforma_in.xlsx&gt;" "&lt;proforma_out.xlsx&gt;" "${esc(exportFileBase())}.json" --skip-fetch</pre>
         <div class="tiny muted" style="margin-top:6px">
           Then reconcile the populated COMPS tab against the <b>COMPS Cell Map</b> sheet.<br/>
-          ⚠ This payload targets <b>${esc(TAB.templateVersion || 'SHIR_MF_Template_v8')}</b> geometry:
-          attribute + fee band at rows ${esc(TAB.attrRowFirst)}–${esc(TAB.attrRowLast)}, nine rows per unit section,
-          row 4 = year · units · distance · vacancy · concession.
-          The COMPS geometry is <b>identical in v7 and v8</b> — v8 changed only what the
-          FEES label cells contain — so this payload suits either.<br/>
-          <b>Use v37.</b> Every older populator loses something <i>silently</i> — none of
-          them error, so the only symptom is a wrong number nobody questions.
-          <b>v36</b> ignores this payload's per-plan market rents and falls back to the
-          bucket average for subject column G, collapsing distinct per-plan rents into
-          one figure.
-          <b>v35 and earlier</b> additionally map fees by ROW: on a v8 workbook they
-          write Insurance into the Cable/Internet row and Pest into Cleaning,
-          and the fee column is summed into every unit's Eff. $/Mo.
-          v35 still resolves the other bands by label (so it handles v4/v5/v6/v7), but
-          <b>v30 and earlier hardcode the v3 rows</b> and will write amenities into the photo band.
-          For a v2 / v36-lineage workbook (7-col stride from W) use populate_comps-<b>v29</b>.
+          ⚠ This payload targets <b>${esc(TAB.templateVersion || 'SHIR_MF_Template_v44')}</b> geometry, resolved
+          by the populator's own by-label dispatcher: Physical ${esc(TAB.physRowFirst)}–${esc(TAB.physRowLast)},
+          Amenities ${esc(TAB.amenRowFirst)}–${esc(TAB.amenRowLast)}, FEES ${esc(TAB.feeRowFirst)}–${esc(TAB.feeRowLast)}
+          (Eff. $/Mo sums through row ${esc(TAB.feeSumLastRow)}), row 4 = year · units · distance · vacancy · concession.<br/>
+          <b>Use v44</b> (rent-comp-data-populator-populate_comps-v44.py). It resolves BOTH this independent-band
+          geometry (SHIR_MF_Template_v41 and later) and the older shared-band geometry (v3–v40, and every
+          current ExStay template) from the workbook's own labels, so it is safe to run against any live
+          template — no version needs to be picked by hand.
+          <b>Every earlier populator (v43 and before) correctly REFUSES to write a v41+ workbook</b> rather
+          than write to the wrong rows — that is a safety guard doing its job, not a bug, but it means only
+          v44 can complete a run against the current template.
         </div>
       </div>
     </div>`;
