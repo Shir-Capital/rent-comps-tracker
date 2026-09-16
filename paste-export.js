@@ -118,7 +118,9 @@ function pxIsWritable(row, col) {
     return ['compTypeValue', 'compSourceValue'].some(n => isOff('compType', n));
   }
   /* v41+: Physical / Amenities / FEES share a start row but are INDEPENDENTLY
-     SIZED below that (Physical 200-223, Amenities 200-269, FEES 200-217 —
+     SIZED below that (on MF v45: Physical 201-224, Amenities 201-270, FEES
+     201-218 — and ExStay v38 puts the same bands 86 rows higher, which is why
+     nothing here may hardcode them —
      Mandatory 201-205 only). They are checked as three separate bands, never
      as one combined attrRowFirst..attrRowLast span (retired) — that shared
      span is exactly the assumption that broke populate_comps-v43 against this
@@ -281,20 +283,15 @@ function pxBuildMirror(tgt) {
       });
     });
 
-    PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, c.physical[pa.key] || '', who, pa.label));
-    AMENITIES.forEach(am => {
-      let v = c.amenities[am.key] || '';
-      /* v44: '# of Pools' is a COUNT column, not Y/N — the app's own toggle is
-         still a three-state Y/N/blank control (schema.amenities carries no
-         separate input type), so the lossy conversion has to happen here on
-         the way out. Mirrors populate_comps-v44.py's identical transform for
-         this same amenity (module docstring: 'Y writes 1 — a floor, not a
-         reading'). A blank stays blank rather than becoming a false 0 — an
-         unresearched amenity is not a confirmed zero. Every other amenity and
-         every physical attribute is unaffected and still writes Y/N/blank. */
-      if (am.valueType === 'count' && v !== '') v = (v === 'Y') ? 1 : 0;
-      put(am.row, base + off.amenityValue, v, who, am.label);
-    });
+    /* Both bands go out through attrOut(), which types the value off the schema
+       field. This used to be a single hand-rolled special case here for
+       '# of Pools' keyed on `am.valueType` — a field name the schema stopped
+       carrying when every field gained a real `type` on 2026-09-16, so the guard
+       had quietly become dead and pools would have gone back to writing 'Y' into
+       a count column. One helper now, shared with the Cell Map and the HelloData
+       fill, so the three cannot disagree again. */
+    PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, attrOut(pa, c.physical[pa.key]), who, pa.label));
+    AMENITIES.forEach(am => put(am.row, base + off.amenityValue, attrOut(am, c.amenities[am.key]), who, am.label));
 
     // ---- FEES: a fee's identity is its LABEL, never its row ---------------
     const fees = (SCHEMA.fees || []).filter(f => f.compsLabel &&
@@ -589,8 +586,10 @@ async function pxBuildWorkbook(mirror) {
   ws.getCell(TAB.rowCompType, 1).value = 'row ' + TAB.rowCompType + ' — type/source';
   /* v41+: three independently-sized bands, not one — labelled separately so
      the spine reflects what is actually on the tab instead of a single stale
-     range. Physical/Amenities/FEES all start together (row 200) but end at
-     different rows (223 / 269 / 217, FEES Mandatory sums only 201-205). */
+     range. Physical/Amenities/FEES all start together (row 201 on MF v45) but
+     end at different rows (224 / 270 / 218; FEES Mandatory sums only 202-206).
+     Every number here is illustrative — the code reads TAB, which follows the
+     record's family. */
   ws.getCell(TAB.physRowFirst, 1).value = 'Physical ' + TAB.physRowFirst + '-' + TAB.physRowLast +
     ' / Amenities ' + TAB.amenRowFirst + '-' + TAB.amenRowLast +
     ' / FEES (Mandatory) ' + TAB.feeRowFirst + '-' + TAB.feeRowLast;

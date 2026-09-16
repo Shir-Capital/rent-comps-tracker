@@ -484,8 +484,13 @@
     return (SCHEMA.fees || []).filter(f => f.compsLabel);
   }
   function attrsHtml(who, isSubject) {
-    const phys = SCHEMA.physical || [];
-    const amen = SCHEMA.amenities || [];
+    /* PHYSICAL / AMENITIES, not SCHEMA.physical / SCHEMA.amenities: those are the
+       MF branch specifically, so reading them here pinned the Screener to MF's
+       field list and row map no matter which template the open deal is on. The
+       getters follow the record's family. (SCHEMA.fees below is correct as-is —
+       fees are shared across both templates and name no row.) */
+    const phys = PHYSICAL;
+    const amen = AMENITIES;
     const fees = compsFees();
     const src = isSubject
       ? '<span class="src" title="The tracker does not capture attributes on the subject yet — see Comp Screen Design.md §9.1">not captured</span>'

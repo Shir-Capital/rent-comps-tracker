@@ -178,12 +178,6 @@ function collectChecks() {
 // Handoff payload — the populate_comps.py contract
 // ============================================================================
 
-/** Tri-state 'Y'/'N'/'' -> true/false/null, so blanks stay blank downstream. */
-function triToJson(v) {
-  if (v === 'Y') return true;
-  if (v === 'N') return false;
-  return null;
-}
 
 function compUnitMixForJson(comp) {
   const out = [];
@@ -381,8 +375,13 @@ function buildPopulatorPayload() {
       visited_by: c.visited_by || '',
       notes: c.notes || '',
       unit_mix: compUnitMixForJson(c),
-      physical: PHYSICAL.reduce((a, p) => { a[p.key] = triToJson(c.physical[p.key]); return a; }, {}),
-      amenities: AMENITIES.reduce((a, m) => { a[m.key] = triToJson(c.amenities[m.key]); return a; }, {}),
+      /* attrJson(), not triToJson(): tri-state still travels as true/false/null,
+         the contract populate_comps.py has read since v27, but the 20 typed
+         fields travel as their own type. triToJson() mapped everything that was
+         not exactly 'Y'/'N' to null, so a roof type, a storey count and a pool
+         count all left here as null once the band grew past Y/N. */
+      physical: PHYSICAL.reduce((a, p) => { a[p.key] = attrJson(p, c.physical[p.key]); return a; }, {}),
+      amenities: AMENITIES.reduce((a, m) => { a[m.key] = attrJson(m, c.amenities[m.key]); return a; }, {}),
       fees: (SCHEMA.fees || []).reduce((a, f) => {
         a[f.key] = f.type === 'number' ? numOrNull(c.fees[f.key]) : (c.fees[f.key] || '');
         return a;
@@ -729,8 +728,13 @@ async function buildCompsWorkbook() {
         });
       });
 
-      PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, who, pa.label, c.physical[pa.key] || ''));
-      AMENITIES.forEach(am => put(am.row, base + off.amenityValue, who, am.label, c.amenities[am.key] || ''));
+      /* attrOut() here too, so the Cell Map shows what the paste actually writes.
+         It did not before: this pass wrote the raw capture while paste-export.js
+         converted pools to 1/0, so the two disagreed on that one field for every
+         comp — harmless to a value-comparing reconciler, confusing to a human
+         reading the sheet, and exactly the drift a shared helper removes. */
+      PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, who, pa.label, attrOut(pa, c.physical[pa.key])));
+      AMENITIES.forEach(am => put(am.row, base + off.amenityValue, who, am.label, attrOut(am, c.amenities[am.key])));
 
       /* FEES $/Mo column — required-of-all-tenants monthly fees. These feed the
          unit rows' Eff. $/Mo formulas, so blanks stay blank.
@@ -1084,13 +1088,21 @@ function hdApplyAttrs(comp, hd) {
   const uAm = (hd.unit_amenities || []).map(x => String(x).toLowerCase());
   const has = (list, token) => (token ? (list.includes(token) ? 'Y' : 'N') : '');
 
+  /* has() answers Y/N, which is the wrong shape for a typed field — `pool` is a
+     COUNT and carries a hellodata token, so this pass would otherwise put 'Y'
+     into a count column and undo the conversion the writers just gained.
+     attrOut() turns that into the 1/0 floor. Only the 13 pre-existing tokens are
+     mapped at all; the 50 fields added on 2026-09-16 carry `hellodata: null` on
+     purpose, because has() returns a confident 'N' for a token HelloData does
+     not use, and a confident wrong answer is worse than leaving it blank for the
+     analyst. Fill them in from a real property-detail response, not a guess. */
   PHYSICAL.forEach(p => {
     if (!p.hellodata) return;              // HelloData cannot answer -> leave blank
-    comp.physical[p.key] = has(uAm.concat(bAm), p.hellodata);
+    comp.physical[p.key] = attrOut(p, has(uAm.concat(bAm), p.hellodata));
   });
   AMENITIES.forEach(a => {
     if (!a.hellodata) return;
-    comp.amenities[a.key] = has(bAm.concat(uAm), a.hellodata);
+    comp.amenities[a.key] = attrOut(a, has(bAm.concat(uAm), a.hellodata));
   });
 }
 

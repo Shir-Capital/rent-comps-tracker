@@ -893,6 +893,12 @@ function manifestEntryFor(p) {
     dealFolderName: p.drive.folderName || '',
     pipelineName: p.drive.pipelineName || '',
     trackerFileId: p.drive.fileId || '',
+    /* Which proforma template this deal is on (2026-09-16). In the manifest so
+       the home list and any org-wide reader can see it without opening the
+       record; the record itself stays the source of truth. Pre-existing entries
+       have no `family` and normFamily() reads absent as MF, which is what those
+       deals were captured against. */
+    family: familyOf(p),
     lastModified: p.updated,
     lastEditor: p.lastEditor || (CURRENT_USER && CURRENT_USER.email) || '',
     currentEditor: (CURRENT_USER && CURRENT_USER.email) || '',

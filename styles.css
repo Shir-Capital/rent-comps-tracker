@@ -409,6 +409,46 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
 .tri button.on-n { background: var(--err-bg); border-color: #fca5a5; color: var(--err); }
 .tri button.on-b { background: #e2e8f0; border-color: #94a3b8; color: #334155; }
 
+/* ------------------------------------------- attribute sub-groups (2026-09-16)
+   The Physical / Amenities cards went from 9 flat Y/N rows each to 20 and 59
+   fields in 4 and 11 sub-groups, so the grids now carry headings and three
+   non-tri controls. Each sub-group is its own .tri-grid with an .attr-group
+   heading between: the heading has to span both columns, and a full-width child
+   of a 2-column grid is more fragile than simply closing and reopening it. */
+.attr-group {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 10px 0 4px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #e2e8f0;
+  cursor: help;
+}
+.attr-group:first-child { margin-top: 0; }
+
+/* Sized to the 108px control column the tri buttons already occupy, so a
+   sub-group of mixed types keeps one straight right-hand edge. */
+.attr-sel, .attr-num, .attr-txt {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 6px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ink);
+}
+.attr-num { text-align: right; }
+.attr-sel:focus, .attr-num:focus, .attr-txt:focus {
+  outline: none; border-color: var(--navy); box-shadow: 0 0 0 2px rgba(29,45,71,.12);
+}
+/* The two keys whose v41 crosswalk is lossy (`pool`, `sport_court`). Dotted rather
+   than coloured: it is a caveat to hover, not a problem to fix. */
+.tri-grid > .lbl.lossy { text-decoration: underline dotted #94a3b8; text-underline-offset: 2px; }
+
 /* --------------------------------------------------- market rent table */
 .mkt-table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .mkt-table th, .mkt-table td {

@@ -92,6 +92,52 @@ function fieldsHtml(fields, obj, path) {
   return out.join('');
 }
 
+/**
+ * Which proforma template this deal is underwritten on.
+ *
+ * It is not cosmetic and it is not a label: it selects the COMPS row map for the
+ * WHOLE record. MF v45 puts the attribute header on row 200, ExStay v38 on 114,
+ * so every physical/amenity/fee cell the export and the paste-mirror write moves
+ * with this control. That is why it sits at the top of tab 1 rather than in a
+ * settings drawer, and why switching it warns first.
+ *
+ * Switching does NOT touch captured data — the field KEYS are identical across
+ * both families (same 20 physical / 59 amenity vocabulary, copied verbatim
+ * between the two templates), only the rows differ. So a record switched by
+ * mistake loses nothing; switch it back and it lands on the original rows again.
+ */
+function familyPickerHtml(current) {
+  return `<div class="kv fam-row"><span class="k" title="Selects the COMPS row map for this whole record.">Template</span>
+    <span class="v"><div class="cat-picker fam-picker" data-fampicker="1">`
+    + FAMILIES.map(f => `<button type="button" class="${current === f ? 'on' : ''}" data-fam="${esc(f)}"
+         title="${esc(f === 'MF' ? 'Multifamily — SHIR_MF_Template' : 'Extended Stay — SHIR_ExStay_Template')}: ${
+           esc((schemaFor(f).compsTab || {}).templateVersion || '')}">${esc(f)}</button>`).join('')
+    + `</div></span></div>`;
+}
+
+function wireFamilyPicker(root) {
+  const wrap = root.querySelector('[data-fampicker]');
+  if (!wrap) return;
+  wrap.addEventListener('click', (ev) => {
+    const btn = ev.target.closest('button[data-fam]');
+    if (!btn || !STATE) return;
+    const next = normFamily(btn.getAttribute('data-fam'));
+    if (next === familyOf(STATE)) return;
+    const tv = (schemaFor(next).compsTab || {}).templateVersion || next;
+    /* Worth a confirm: it silently re-points every comp cell this record will
+       ever write, and the change is invisible until someone opens the export. */
+    const NL = String.fromCharCode(10);
+    if (!confirm('Switch this deal to ' + next + ' (' + tv + ')?' + NL + NL
+        + 'Captured values are kept — the field names are the same on both '
+        + 'templates — but every COMPS row the export and paste-mirror write '
+        + 'will move to the ' + next + ' layout.')) return;
+    STATE.family = next;
+    saveState();
+    renderPhase1();
+    toast('Template set to ' + next + ' — ' + tv);
+  });
+}
+
 function categoryPickerHtml(current, path) {
   return `<div class="cat-picker" data-catpicker="${esc(path)}">`
     + CATEGORIES.map(c => `<button type="button" class="${esc(c.key)}${current === c.key ? ' on' : ''}"
@@ -432,23 +478,78 @@ function rerenderUnitMix(listPath) {
 // Tri-state Y / N / blank
 // ============================================================================
 
+
 /**
- * Three explicit buttons rather than a cycling toggle: blank must be reachable
- * in one tap and must not look like an unset default. A blank cell is honest
- * about a gap in the data; a false "N" claims the comp positively lacks it.
+ * The Physical / Amenities capture grids.
+ *
+ * Until 2026-09-16 these were a flat triHtml() over 9 fields each — which was the
+ * whole vocabulary back on template v9, and only a third of it from v41 on. The
+ * band actually carries 20 physical and 59 amenity fields in 4 and 11 sub-groups,
+ * and the other 50 simply had nowhere to be typed.
+ *
+ * Two things follow from that and are load-bearing here:
+ *
+ *  - A sub-group HEADING is emitted whenever `group` changes, so the grid reads
+ *    the way the tab does. Item order IS group order — build_schema.py refuses a
+ *    schema whose groups are not contiguous, precisely because a re-opened group
+ *    would render twice under two headings rather than fail.
+ *  - Not every field is a Y/N any more. `type` drives the control, and the three
+ *    non-tri ones matter: a `count` ("# of Pools") cannot hold 'Y' — that was the
+ *    v44 pool bug — and `alloc` is the one type the TEMPLATE itself declares, via
+ *    a real "To Property / To City/Utility" dropdown.
+ *
+ * Non-tri controls carry `data-fpath`/`data-fkey`, so the existing
+ * wireFieldDelegation() picks up both their `input` and `change` events and
+ * writes them to the same object the tri buttons do. No new delegation.
  */
-function triHtml(items, obj, path) {
-  return `<div class="tri-grid">` + items.map(it => {
-    const v = obj[it.key] || '';
-    /* Three pairs across gives each label ~70px, so the longer ones ellipsis.
-       The title keeps the full text one hover away. */
-    return `<div class="lbl" title="${esc(it.label)}">${esc(it.label)}</div>
-      <div class="tri" data-tri="${esc(path)}" data-trikey="${esc(it.key)}">
+function attrHtml(items, obj, path) {
+  const out = [];
+  let group = null;
+  items.forEach(it => {
+    if (it.group !== group) {
+      group = it.group;
+      /* Closes the previous grid and opens the next so the heading can span the
+         full width: it is a sibling of the grids, not a cell inside one. */
+      if (out.length) out.push(`</div>`);
+      out.push(`<div class="attr-group" title="${esc(group)} — a sub-group header on the COMPS tab">${esc(group)}</div>`);
+      out.push(`<div class="tri-grid">`);
+    }
+    /* Through attrOut(), the same coercion the writers use, so the control shows
+       what would actually be written. It matters for one real case: a record
+       captured before the band was typed stores `pool: 'Y'`, and feeding that
+       raw into <input type="number"> renders BLANK in a browser (an invalid
+       numeric value) — the analyst would see an empty box over a captured
+       answer, and the next edit would save that blank over it. attrOut turns it
+       into the 1 the paste writes. Tri-state is unaffected: attrOut returns
+       'Y'/'N'/'' , exactly what the buttons compare against. */
+    const v = attrOut(it, obj[it.key]);
+    const dsa = `data-fpath="${esc(path)}" data-fkey="${esc(it.key)}"`;
+    let control;
+    if (it.type === 'alloc') {
+      control = `<select class="attr-sel" ${dsa}><option value=""${v === '' ? ' selected' : ''}>—</option>`
+        + (it.options || []).map(o =>
+            `<option value="${esc(o)}"${String(v) === o ? ' selected' : ''}>${esc(o)}</option>`).join('')
+        + `</select>`;
+    } else if (it.type === 'count' || it.type === 'number') {
+      /* step/min differ: a count is a whole number of things and cannot be
+         negative; `number` also covers Renovated - Year, so no min is imposed. */
+      const extra = it.type === 'count' ? 'step="1" min="0"' : 'step="any"';
+      control = `<input type="number" ${extra} inputmode="numeric" class="attr-num"
+        ${dsa} value="${esc(v)}" placeholder="—" />`;
+    } else if (it.type === 'text') {
+      control = `<input type="text" class="attr-txt" ${dsa} value="${esc(v)}" placeholder="—" />`;
+    } else {
+      control = `<div class="tri" data-tri="${esc(path)}" data-trikey="${esc(it.key)}">
         <button type="button" data-triv="Y" class="${v === 'Y' ? 'on-y' : ''}">Y</button>
         <button type="button" data-triv="N" class="${v === 'N' ? 'on-n' : ''}">N</button>
         <button type="button" data-triv=""  class="${v === '' ? 'on-b' : ''}">—</button>
       </div>`;
-  }).join('') + `</div>`;
+    }
+    const hint = it.lossy && it.note ? it.note : it.label;
+    out.push(`<div class="lbl${it.lossy ? ' lossy' : ''}" title="${esc(hint)}">${esc(it.label)}</div>${control}`);
+  });
+  if (out.length) out.push(`</div>`);
+  return out.join('');
 }
 
 /**
@@ -896,8 +997,14 @@ function renderPhase1() {
   host.classList.add('narrow');
   host.innerHTML = `
     <div class="card subject-card">
-      <div class="card-head"><span class="grow">Subject Property</span></div>
-      <div class="card-body">${fieldsHtml(SCHEMA.subjectFields || [], s, 'subject')}</div>
+      <div class="card-head">
+        <span class="grow">Subject Property</span>
+        <span class="head-stat">${esc(familyOf(STATE))}</span>
+      </div>
+      <div class="card-body">
+        ${familyPickerHtml(familyOf(STATE))}
+        ${fieldsHtml(SCHEMA.subjectFields || [], s, 'subject')}
+      </div>
     </div>
 
     <div class="card">
@@ -924,6 +1031,7 @@ function renderPhase1() {
       </div>
     </div>`;
 
+  wireFamilyPicker(host);
   const f = $('#btn-p1-find');
   if (f) f.onclick = () => promptFindFolder();
   const u = $('#btn-p1-url');
@@ -1078,13 +1186,13 @@ function renderCompEditor(compId) {
         <div class="card-body">
           <div class="card-hint">Leave “—” when you don't know.
             A blank cell is an honest gap; “N” claims the comp positively lacks it.</div>
-          ${triHtml(PHYSICAL, c.physical, path + '.physical')}
+          ${attrHtml(PHYSICAL, c.physical, path + '.physical')}
         </div>
       </div>
 
       <div class="card">
         <div class="card-head"><span class="grow">Amenities</span></div>
-        <div class="card-body">${triHtml(AMENITIES, c.amenities, path + '.amenities')}</div>
+        <div class="card-body">${attrHtml(AMENITIES, c.amenities, path + '.amenities')}</div>
       </div>
 
       <div class="card">
@@ -1094,7 +1202,7 @@ function renderCompEditor(compId) {
         <div class="card-body">
           <div class="card-hint">Required of ALL tenants — these feed the template's
             Eff. $/Mo formulas. Leave blank when unknown; never guess.</div>
-          ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsRow), c.fees, path + '.fees')}
+          ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsLabel), c.fees, path + '.fees')}
         </div>
       </div>
     </div>
@@ -1108,7 +1216,7 @@ function renderCompEditor(compId) {
       <div class="card-body">
         ${fieldsHtml(SCHEMA.compExtraFields || [], c, path)}
         <div class="sub-label" title="One-time or optional charges. Not written to the COMPS tab, but they travel in the export JSON.">Tracker-only fees (one-time / optional)</div>
-        ${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsRow), c.fees, path + '.fees')}
+        ${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsLabel), c.fees, path + '.fees')}
       </div>
     </div>`;
 

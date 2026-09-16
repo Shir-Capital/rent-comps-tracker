@@ -120,12 +120,121 @@ function streetOnly(addr) {
 
 // ------------------------------------------------------------ schema access
 const SCHEMA = window.SCHEMA || {};
-const TAB = SCHEMA.compsTab || {};
-const BUCKETS = SCHEMA.unitBuckets || [];
-const PHYSICAL = SCHEMA.physical || [];
-const AMENITIES = SCHEMA.amenities || [];
 const CATEGORIES = SCHEMA.categories || [];
-const MAX_COMPS = TAB.maxComps || 8;
+
+/* ---------------------------------------------------------------- families
+   A deal is underwritten on one of two proforma templates, and their COMPS tabs
+   put the same fields on DIFFERENT ROWS (MF v45's attribute header is row 200,
+   ExStay v38's is 114). comps_schema.json carries both: MF at the top level,
+   ExStay under `exstay`.
+
+   TAB / BUCKETS / PHYSICAL / AMENITIES used to be `const`s bound once at load to
+   the MF keys, and roughly 180 call sites across six files read them by those
+   bare names. They are now GETTERS that resolve against the open property's
+   family, so every one of those call sites became family-aware without being
+   touched — which is the only reason this was a safe change to make at all.
+   Re-binding them as consts would silently pin the whole app to MF again.
+
+   Deliberately NOT per-family: `fees` / `feeVocabulary` (the FEES dropdown was
+   copied verbatim between the two templates, so there is nothing to switch) and
+   every Tracker-UI vocabulary (categories, wdTypes, sources, …), none of which
+   name a COMPS row. Only genuinely row-dependent structures branch. */
+const FAMILIES = ['MF', 'ExStay'];
+const DEFAULT_FAMILY = 'MF';
+
+/** Normalise anything a record or a UI control might carry to a known family. */
+function normFamily(v) {
+  const s = String(v == null ? '' : v).trim().toLowerCase().replace(/[^a-z]/g, '');
+  if (s === 'exstay' || s === 'extendedstay' || s === 'es') return 'ExStay';
+  if (s === 'mf' || s === 'multifamily') return 'MF';
+  return DEFAULT_FAMILY;
+}
+
+/** The family of a given record. Absent (every pre-2026-09-16 record) => MF,
+    which is what those records were captured against. */
+function familyOf(p) { return normFamily(p && p.family); }
+
+/** The family currently in effect — the open property's, else the default.
+
+    The try/catch is load-order, not paranoia: `STATE` is declared with `let`
+    further down this file, and a `let` in its temporal dead zone throws on bare
+    reference AND on `typeof` — unlike `var`, which is why the usual
+    `typeof X !== 'undefined'` guard does not help here. Any TAB/BUCKETS read
+    that happens while this file is still evaluating would otherwise take down
+    the whole app at load. */
+function currentFamily() {
+  try {
+    return STATE ? familyOf(STATE) : DEFAULT_FAMILY;
+  } catch (e) {
+    return DEFAULT_FAMILY;
+  }
+}
+
+/** The schema branch for a family. ExStay falls back to the MF keys rather than
+    to {} if the branch is somehow missing, because empty geometry would let a
+    writer compute row `undefined` and land values nowhere. */
+function schemaFor(family) {
+  if (normFamily(family) === 'ExStay' && SCHEMA.exstay) return SCHEMA.exstay;
+  return SCHEMA;
+}
+
+/** The schema branch in effect right now. */
+function FAM() { return schemaFor(currentFamily()); }
+
+[
+  ['TAB', () => FAM().compsTab || {}],
+  ['BUCKETS', () => FAM().unitBuckets || []],
+  ['PHYSICAL', () => FAM().physical || []],
+  ['AMENITIES', () => FAM().amenities || []],
+  ['MAX_COMPS', () => (FAM().compsTab || {}).maxComps || 8],
+].forEach(([name, get]) => {
+  /* On globalThis, not as a lexical `const`: a bare `TAB` in any of the other
+     files resolves through the global object once no lexical binding shadows it.
+     `configurable` so a reload of this file in a harness does not throw. */
+  Object.defineProperty(globalThis, name, { get, configurable: true });
+});
+
+/* ------------------------------------------- attribute values, by field type
+
+   Before 2026-09-16 every physical/amenity field was a Y/N/blank tri-state, so
+   "the value" needed no interpretation and each writer just passed the captured
+   string through. The band's real vocabulary is not all tri-state — 20 of the 79
+   fields are text, number, count or alloc — and there were already THREE places
+   coercing values independently (the paste mirror, the Cell Map, the HelloData
+   fill), which is exactly how the '# of Pools' column ended up with a 'Y' in it
+   on the Cell Map while the paste wrote 1. One helper, used by all of them.
+
+   Blank in stays blank out, always. An uncaptured field is not a zero and not an
+   'N' — that distinction is the whole point of the tri-state control, and it
+   matters just as much for a count nobody researched. */
+function attrOut(item, v) {
+  const s = (v == null ? '' : String(v)).trim();
+  if (s === '') return '';
+  const t = (item && item.type) || 'tri';
+  if (t === 'count' || t === 'number') {
+    /* 'Y' on a count column is a legacy or HelloData answer to a question that
+       used to be Y/N. It means "at least one" — a floor, not a reading — which
+       is the same lossy conversion populate_comps-v45.py documents for pools. */
+    if (s === 'Y') return 1;
+    if (s === 'N') return 0;
+    const n = Number(s.replace(/,/g, ''));
+    return Number.isFinite(n) ? n : '';
+  }
+  if (t === 'text' || t === 'alloc') return s;
+  return s === 'Y' ? 'Y' : (s === 'N' ? 'N' : '');
+}
+
+/** The same value for the populate_comps.py JSON payload. Tri-state keeps its
+    true/false/null encoding — the populator has read it that way since v27 and
+    this is not the pass to change that contract — while the typed fields travel
+    as their own type instead of being flattened to null by triToJson(). */
+function attrJson(item, v) {
+  const out = attrOut(item, v);
+  if (out === '') return null;
+  const t = (item && item.type) || 'tri';
+  if (t === 'tri') return out === 'Y';
+  return out;
+}
 
 function bucketByKey(key) { return BUCKETS.find(b => b.key === key) || null; }
 
@@ -240,6 +349,9 @@ function newProperty(name) {
       lastBackupAt: null,
       autoSearchAttempted: false,
     },
+    /* Which proforma template this deal is underwritten on. Drives every COMPS
+       row number the app reads; see the families block above. */
+    family: DEFAULT_FAMILY,
     subject: { name: String(name || '').trim() },
     subjectUnitMix: [],
     comps: [],
@@ -269,6 +381,12 @@ function hydrateProperty(p) {
      of truth whenever it has an opinion (see isEntryArchived); this is the
      same-device hint used for the drawer's button label and offline. */
   if (p.archived === undefined) p.archived = false;
+  /* Family (2026-09-16). Absent on every record captured before this, and those
+     were all captured against the MF template, so normFamily()'s MF default is
+     the historically correct reading — not merely a convenient one. Normalised
+     rather than trusted so a hand-edited or round-tripped record cannot put an
+     unknown string in front of schemaFor(). */
+  p.family = normFamily(p.family);
   p.subject = p.subject || {};
   if (p.subject.util_structure === undefined) p.subject.util_structure = '';
   if (p.subject.wd_type && WD_TYPE_MIGRATION[p.subject.wd_type]) {

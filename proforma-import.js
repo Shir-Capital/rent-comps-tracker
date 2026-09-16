@@ -539,17 +539,52 @@ function pfReadComps(ws) {
   for (let r = totRow; r <= totRow + 8 && !attrHdr; r++) {
     if (/physical attribute/i.test(pfS(pfV(ws, r, S)))) attrHdr = r;
   }
-  const labelBlock = (col) => {
+  /* The attribute band is read SCHEMA-FIRST and label-VERIFIED (2026-09-16).
+
+     What this replaced, and why: it used to scan a fixed 14-row window below the
+     header and stop at the first blank, then match the result against PHYSICAL /
+     AMENITIES BY POSITION. That was right for the v9 band — one shared 9-row
+     block, no sub-groups. Template v41 rebuilt it into three independently-sized
+     bands 24 / 70 / 18 rows deep, interleaved with 15 sub-group HEADER rows, and
+     this reader was never updated: on a v45 workbook the 14-row window truncated
+     Physical at 'Roof Type' and Amenities at 'Sauna', and — far worse — the
+     positional match then read the group heading 'Building' as `hvac_indiv`,
+     'Property Type' as `wd_inunit`, and so on down. Every attribute imported
+     from a v41+ proforma landed on the wrong field.
+
+     Now: each schema field names its own row, the workbook's own header row fixes
+     the offset, and the label at that row must MATCH before the value is taken.
+     A field whose label does not match is skipped and reported, never guessed —
+     the same rule the fee reader below has followed since 2026-08-08. */
+  const bandDelta = attrHdr ? attrHdr - (TAB.rowAttrHeader || attrHdr) : 0;
+  const schemaBlock = (items, labelCol) => {
     const out = [];
-    for (let r = attrHdr + 1; r <= attrHdr + 14; r++) {
-      const v = pfS(pfV(ws, r, col));
-      if (v) out.push([r, v]);
-      else if (out.length) break;
-    }
+    items.forEach(it => {
+      const r = it.row + bandDelta;
+      const seen = pfS(pfV(ws, r, labelCol));
+      /* Compare on the label, not the row alone: the offset above is derived
+         from ONE anchor, so a workbook whose band was edited mid-way would
+         otherwise silently shift everything below the edit. */
+      if (seen && seen.trim().toLowerCase() === it.label.trim().toLowerCase()) {
+        out.push([r, seen, it.key]);
+      }
+    });
+    return out;
+  };
+  /* Fees keep the scan — they are matched by label per comp further down, the
+     labels are analyst-editable dropdowns, and blank-but-labelable slots are
+     normal. Widened from the old 14-row window to the Mandatory band the schema
+     declares, and it no longer stops at the first blank, which used to cut the
+     read off at the two empty slots every template ships with. */
+  const feeBlock = () => {
+    const out = [];
+    const first = (TAB.feeRowFirst || 0) + bandDelta;
+    const last = (TAB.feeSumLastRow || TAB.feeRowLast || 0) + bandDelta;
+    for (let r = first; r <= last && first; r++) out.push([r, pfS(pfV(ws, r, S + 5))]);
     return out;
   };
   const blocks = attrHdr
-    ? { attrs: labelBlock(S), amens: labelBlock(S + 2), fees: labelBlock(S + 5) }
+    ? { attrs: schemaBlock(PHYSICAL, S), amens: schemaBlock(AMENITIES, S + 2), fees: feeBlock() }
     : { attrs: [], amens: [], fees: [] };
 
   // ---- comp blocks: starts from the comp-number cells on row 3
@@ -591,8 +626,8 @@ function pfReadComps(ws) {
     // nine-column block. On any other stride they stay unread — a guessed
     // offset writes a neighbouring comp's answers onto this one.
     if (attrHdr && stride === 9) {
-      c.attrs = blocks.attrs.map(([r, l]) => [l, pfV(ws, r, b + 2)]);
-      c.amens = blocks.amens.map(([r, l]) => [l, pfV(ws, r, b + 5)]);
+      c.attrs = blocks.attrs.map(([r, l, k]) => [l, pfV(ws, r, b + 2), k]);
+      c.amens = blocks.amens.map(([r, l, k]) => [l, pfV(ws, r, b + 5), k]);
       c.fees = blocks.fees.map(([r, l]) => [l, pfV(ws, r, b + 7)]);
     } else {
       c.attrs = []; c.amens = []; c.fees = [];
@@ -807,16 +842,36 @@ function pfToImport(det) {
     // Attributes, amenities and fees are matched POSITIONALLY — row order is
     // the contract, the labels are analyst-editable text (one live file calls
     // fee row 6 'Dep.Waiver', not 'Cable/Internet').
-    (c.attrs || []).slice(0, PHYSICAL.length).forEach(([lbl, val], i) => {
-      const [t, raw] = pfTri(val);
-      comp.physical[PHYSICAL[i].key] = t;
-      if (raw) notes.push(lbl + ': ' + raw);
-    });
-    (c.amens || []).slice(0, AMENITIES.length).forEach(([lbl, val], i) => {
-      const [t, raw] = pfTri(val);
-      comp.amenities[AMENITIES[i].key] = t;
-      if (raw) notes.push(lbl + ': ' + raw);
-    });
+    /* BY KEY, not by position — the key was resolved and label-verified when the
+       band was read. And by TYPE: forcing pfTri() on everything turned a
+       'Pitched shingle' roof into blank and a pool COUNT of 3 into blank, which
+       is how 61 of the 79 fields would have imported once the band was expanded
+       past the original Y/N-only nine. */
+    const byKey = (items) => items.reduce((a, it) => { a[it.key] = it; return a; }, {});
+    const physByKey = byKey(PHYSICAL), amenByKey = byKey(AMENITIES);
+    const readAttr = (bag, lookup, lbl, val, key) => {
+      const it = lookup[key];
+      if (!it) return;
+      if (it.type === 'tri' || !it.type) {
+        const [t, extra] = pfTri(val);
+        bag[key] = t;
+        if (extra) notes.push(lbl + ': ' + extra);
+        return;
+      }
+      const s = pfS(val);
+      if (it.type === 'count' || it.type === 'number') {
+        const n = pfN(val);
+        /* A count column that still holds legacy Y/N: 'Y' is a floor of 1, not a
+           reading, exactly as the write side treats it. */
+        bag[key] = n !== null ? String(n)
+          : (s === 'Y' ? '1' : (s === 'N' ? '0' : ''));
+        if (n === null && s && s !== 'Y' && s !== 'N') notes.push(lbl + ': ' + s);
+      } else {
+        bag[key] = s;   // text, and alloc's two dropdown strings
+      }
+    };
+    (c.attrs || []).forEach(([lbl, val, key]) => readAttr(comp.physical, physByKey, lbl, val, key));
+    (c.amens || []).forEach(([lbl, val, key]) => readAttr(comp.amenities, amenByKey, lbl, val, key));
     /* Fees are matched BY LABEL, per comp. The band's row order is not a
        contract: v8 made these cells dropdowns and dropped five of the eight v7
        defaults, and analysts free-type per comp — in this very file, comp 2 has

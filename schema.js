@@ -280,123 +280,667 @@ window.SCHEMA = {
     }
   ],
   "_unitBucketsNote": "Rows widened on SHIR_MF_Template_v41 (efficiency 19 data rows, the rest 24 each — the efficiency section cannot hold as many as the others; unchanged since). compsLabel text (+Eff, +1/1(.5), ...) and subtotalRow = endRow + 1 are unchanged from v9 — verified live at rows 25/50/75/100/125/150/175 on v44.",
-  "_physicalNote": "These 9 keys are UNCHANGED since v9 — same internal key, same display label, same populate_comps.py logic. What moved is only the ROW: on v45 they live inside the Physical band's 'Unit Systems' sub-group (rows 208-216) rather than being the whole Physical block (which is now 201-224 and also carries a 'Building' sub-group — Property Type/Stories/Residential Buildings/Renovated - Year/Renovated - Scope — and 'Terms'/'Location' sub-groups the tracker does not populate). Rows resolved live via populate_comps-v45.py's own resolve_comps_geometry(), not re-derived by hand.",
+  "_physicalNote": "All 20 Physical fields the v41+ band actually carries, in 4 sub-groups (Building 5, Unit Systems 9, Terms 5, Location 1) — expanded 2026-09-16 from the 9 Unit Systems fields this schema tracked before, which were the whole vocabulary back on v9 and only a third of it from v41 on. Every row is resolved live out of THIS family's own workbook by label (Accessories/gen_bands.py), never by applying an offset to the other family's numbers. `group` carries the sub-group header the field sits under, and item order is group order — the capture UI renders straight off it. `type` is one of tri (Y/N/blank, 59 of the 79 fields across both bands), text, number, count or alloc; see _bandTypesNote. The 9 pre-existing keys are byte-identical (key, label, row, hellodata) so no saved record is orphaned and populate_comps-v45.py's PHYSICAL_ATTR_LABELS still routes them.",
   "physical": [
+    {
+      "key": "property_type",
+      "label": "Property Type",
+      "group": "Building",
+      "row": 202,
+      "type": "text",
+      "hellodata": null
+    },
+    {
+      "key": "stories",
+      "label": "Stories",
+      "group": "Building",
+      "row": 203,
+      "type": "number",
+      "hellodata": null
+    },
+    {
+      "key": "residential_buildings",
+      "label": "Residential Buildings",
+      "group": "Building",
+      "row": 204,
+      "type": "number",
+      "hellodata": null
+    },
+    {
+      "key": "renovated_year",
+      "label": "Renovated - Year",
+      "group": "Building",
+      "row": 205,
+      "type": "number",
+      "hellodata": null
+    },
+    {
+      "key": "renovated_scope",
+      "label": "Renovated - Scope",
+      "group": "Building",
+      "row": 206,
+      "type": "text",
+      "hellodata": null
+    },
     {
       "key": "hvac_indiv",
       "label": "HVAC Indiv.",
+      "group": "Unit Systems",
       "row": 208,
+      "type": "tri",
       "hellodata": "central_air_conditioning"
     },
     {
       "key": "wd_inunit",
       "label": "W/D In-Unit",
+      "group": "Unit Systems",
       "row": 209,
+      "type": "tri",
       "hellodata": "washer_dryer_in_unit"
     },
     {
       "key": "wd_hookups",
       "label": "W/D Hookups",
+      "group": "Unit Systems",
       "row": 210,
+      "type": "tri",
       "hellodata": "washer_dryer_hookups"
     },
     {
       "key": "water_util",
       "label": "Water Util.",
+      "group": "Unit Systems",
       "row": 211,
+      "type": "tri",
       "hellodata": null
     },
     {
       "key": "gas_util",
       "label": "Gas Util.",
+      "group": "Unit Systems",
       "row": 212,
+      "type": "tri",
       "hellodata": null
     },
     {
       "key": "elec_util",
       "label": "Elec. Util.",
+      "group": "Unit Systems",
       "row": 213,
+      "type": "tri",
       "hellodata": null
     },
     {
       "key": "roof_type",
       "label": "Roof Type",
+      "group": "Unit Systems",
       "row": 214,
+      "type": "text",
       "hellodata": null
     },
     {
       "key": "priv_yards",
       "label": "Priv. Yards",
+      "group": "Unit Systems",
       "row": 215,
+      "type": "tri",
       "hellodata": "patio_or_balcony"
     },
     {
       "key": "indiv_hwh",
       "label": "Indiv. HWH",
+      "group": "Unit Systems",
       "row": 216,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "lease_terms",
+      "label": "Lease Terms",
+      "group": "Terms",
+      "row": 218,
+      "type": "text",
+      "hellodata": null
+    },
+    {
+      "key": "locator_commission",
+      "label": "Locator Commission",
+      "group": "Terms",
+      "row": 219,
+      "type": "text",
+      "hellodata": null
+    },
+    {
+      "key": "views",
+      "label": "Views",
+      "group": "Terms",
+      "row": 220,
+      "type": "text",
+      "hellodata": null
+    },
+    {
+      "key": "specials",
+      "label": "Specials",
+      "group": "Terms",
+      "row": 221,
+      "type": "text",
+      "hellodata": null
+    },
+    {
+      "key": "other_notes",
+      "label": "Other Notes",
+      "group": "Terms",
+      "row": 222,
+      "type": "text",
+      "hellodata": null
+    },
+    {
+      "key": "near_transit",
+      "label": "Near Transit",
+      "group": "Location",
+      "row": 224,
+      "type": "tri",
       "hellodata": null
     }
   ],
-  "_amenitiesNote": "v44's Amenities band replaced the old 9-item vocabulary with a 59-item one (11 sub-groups); it is NOT a superset of the v9 list. These 9 keys are the same crosswalk populate_comps-v44.py's AMENITY_LABEL_MAP uses: 7 map cleanly to a same-meaning v44 label at a new row, 2 are LOSSY (flagged with `lossy: true` and a `note`) — `pool` used to be a Y/N and is now a COUNT ('# of Pools'; a truthy flag writes 1, a floor, not a reading), and `sport_court` now names one specific court type out of three the new vocabulary splits out (Basketball / Volleyball / # of Tennis Courts). Rows are NOT contiguous — they are scattered across the 70-row band interleaved with the ~50 amenity items and 11 sub-group headers this schema does not track — so build_schema.py validates them by band-membership and uniqueness, never by a fixed anchor + index.",
+  "_amenitiesNote": "All 59 Amenity fields the v41+ band carries, in 11 sub-groups (Building & Common 2, Activity / Lifestyle 13, Parking 6, Floorplan 9, Kitchen / Bath 5, Services 6, Utilities 3, Property Allocated Expenses 5, Internet / Broadband 2, Security 5, Pets 3) — expanded 2026-09-16 from the 9-key v9 vocabulary, which was NOT a subset of this one. Rows are NOT contiguous: they interleave with the 11 sub-group header rows, so build_schema.py validates by band-membership and uniqueness, never by anchor + index. The 9 pre-existing keys keep their exact key/label/row/hellodata, including the two that read oddly against the new vocabulary and are kept anyway because renaming them would orphan live records and break the populator: `pool` is the key for '# of Pools' and `sport_court` for 'Basketball Court'. Both still carry `lossy: true` and their note.",
+  "_bandTypesNote": "Field input types. The template carries almost NO type metadata — every value cell in both bands is General format with no data validation — so only ONE of these is measured and the rest are decisions, recorded here so they can be argued with rather than silently re-guessed. MEASURED: `alloc` (5 fields, the Property Allocated Expenses sub-group) is the one case the workbook itself types, via a real 'To Property,To City/Utility' dropdown read off ws.data_validations; its `options` come from that list. DECIDED: `count` = any label starting with '#' (# Common Laundry Rms, # of Pools, # of Tennis Courts) — a count column cannot hold a Y/N string, which is the bug v44 introduced for pools; `number` = Stories, Residential Buildings, Renovated - Year; `text` = Property Type, Renovated - Scope, Roof Type, Lease Terms, Locator Commission, Views, Specials, Other Notes, Pets Policy; `tri` = everything else, the Y/N/blank tri-state all 18 pre-existing fields already used. Note `roof_type` stays `text` here but populate_comps-v45.py still writes it 'Y'/'N' through the legacy PHYSICAL_ATTR_LABELS route — the paste-export route honours the type, the populator route does not, and only the populator can fix that.",
   "amenities": [
     {
-      "key": "fitness_center",
-      "label": "Fitness Room / Gym",
-      "row": 209,
-      "hellodata": "fitness_center"
+      "key": "elevators",
+      "label": "Elevators",
+      "group": "Building & Common",
+      "row": 202,
+      "type": "tri",
+      "hellodata": null
     },
     {
-      "key": "clubhouse",
-      "label": "Clubroom",
-      "row": 207,
-      "hellodata": "club_house_party_room"
+      "key": "num_common_laundry_rms",
+      "label": "# Common Laundry Rms",
+      "group": "Building & Common",
+      "row": 203,
+      "type": "count",
+      "hellodata": null
     },
     {
-      "key": "business_center",
-      "label": "Business Center",
-      "row": 242,
-      "hellodata": "business_center"
-    },
-    {
-      "key": "pool",
-      "label": "# of Pools",
-      "row": 216,
-      "hellodata": "swimming_pool",
-      "lossy": true,
-      "valueType": "count",
-      "note": "v44 changed this from a Y/N amenity to a pool COUNT. A truthy HelloData flag writes 1 (a floor on the real count, not a reading), never 'Y'."
-    },
-    {
-      "key": "dog_park",
-      "label": "Dog Park",
-      "row": 208,
-      "hellodata": "dog_park"
-    },
-    {
-      "key": "bbq_grill",
-      "label": "Grill(s)",
-      "row": 210,
-      "hellodata": "barbecue_grill"
-    },
-    {
-      "key": "gated",
-      "label": "Access Gates (Driving)",
-      "row": 262,
-      "hellodata": "gated_community_access"
+      "key": "24hr_fitness_room",
+      "label": "24hr Fitness Room",
+      "group": "Activity / Lifestyle",
+      "row": 205,
+      "type": "tri",
+      "hellodata": null
     },
     {
       "key": "sport_court",
       "label": "Basketball Court",
+      "group": "Activity / Lifestyle",
       "row": 206,
+      "type": "tri",
       "hellodata": "basketball_court",
       "lossy": true,
       "note": "v44 splits the old generic 'Sport Court' three ways (Basketball Court / Volleyball / # of Tennis Courts); this key routes to Basketball Court only."
     },
     {
+      "key": "clubhouse",
+      "label": "Clubroom",
+      "group": "Activity / Lifestyle",
+      "row": 207,
+      "type": "tri",
+      "hellodata": "club_house_party_room"
+    },
+    {
+      "key": "dog_park",
+      "label": "Dog Park",
+      "group": "Activity / Lifestyle",
+      "row": 208,
+      "type": "tri",
+      "hellodata": "dog_park"
+    },
+    {
+      "key": "fitness_center",
+      "label": "Fitness Room / Gym",
+      "group": "Activity / Lifestyle",
+      "row": 209,
+      "type": "tri",
+      "hellodata": "fitness_center"
+    },
+    {
+      "key": "bbq_grill",
+      "label": "Grill(s)",
+      "group": "Activity / Lifestyle",
+      "row": 210,
+      "type": "tri",
+      "hellodata": "barbecue_grill"
+    },
+    {
+      "key": "hot_tub_jacuzzi",
+      "label": "Hot Tub / Jacuzzi",
+      "group": "Activity / Lifestyle",
+      "row": 211,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "jogging_trail",
+      "label": "Jogging Trail",
+      "group": "Activity / Lifestyle",
+      "row": 212,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
       "key": "playground",
       "label": "Playground",
+      "group": "Activity / Lifestyle",
       "row": 213,
+      "type": "tri",
       "hellodata": "playground"
+    },
+    {
+      "key": "sauna",
+      "label": "Sauna",
+      "group": "Activity / Lifestyle",
+      "row": 214,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "volleyball",
+      "label": "Volleyball",
+      "group": "Activity / Lifestyle",
+      "row": 215,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "pool",
+      "label": "# of Pools",
+      "group": "Activity / Lifestyle",
+      "row": 216,
+      "type": "count",
+      "hellodata": "swimming_pool",
+      "lossy": true,
+      "note": "v44 changed this from a Y/N amenity to a pool COUNT. A truthy HelloData flag writes 1 (a floor on the real count, not a reading), never 'Y'."
+    },
+    {
+      "key": "num_of_tennis_courts",
+      "label": "# of Tennis Courts",
+      "group": "Activity / Lifestyle",
+      "row": 217,
+      "type": "count",
+      "hellodata": null
+    },
+    {
+      "key": "assigned_parking",
+      "label": "Assigned Parking",
+      "group": "Parking",
+      "row": 219,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "attached_garages",
+      "label": "Attached Garages",
+      "group": "Parking",
+      "row": 220,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "community_parking_garage",
+      "label": "Community Parking Garage",
+      "group": "Parking",
+      "row": 221,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "covered_parking",
+      "label": "Covered Parking",
+      "group": "Parking",
+      "row": 222,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "detached_garages",
+      "label": "Detached Garages",
+      "group": "Parking",
+      "row": 223,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "ev_charging_stations",
+      "label": "EV Charging Stations",
+      "group": "Parking",
+      "row": 224,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "extra_storage",
+      "label": "Extra Storage",
+      "group": "Floorplan",
+      "row": 226,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "fireplaces",
+      "label": "Fireplaces",
+      "group": "Floorplan",
+      "row": 227,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "hardwood_floors",
+      "label": "Hardwood Floors",
+      "group": "Floorplan",
+      "row": 228,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "high_ceilings",
+      "label": "High Ceilings",
+      "group": "Floorplan",
+      "row": 229,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "patio_balcony",
+      "label": "Patio / Balcony",
+      "group": "Floorplan",
+      "row": 230,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "private_yards",
+      "label": "Private Yards",
+      "group": "Floorplan",
+      "row": 231,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "w_d_connections",
+      "label": "W/D Connections",
+      "group": "Floorplan",
+      "row": 232,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "w_d_provided",
+      "label": "W/D Provided",
+      "group": "Floorplan",
+      "row": 233,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "walk_in_closets",
+      "label": "Walk-in Closets",
+      "group": "Floorplan",
+      "row": 234,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "dishwashers",
+      "label": "Dishwashers",
+      "group": "Kitchen / Bath",
+      "row": 236,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "granite_stone_countertops",
+      "label": "Granite / Stone Countertops",
+      "group": "Kitchen / Bath",
+      "row": 237,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "pantry",
+      "label": "Pantry",
+      "group": "Kitchen / Bath",
+      "row": 238,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "stainless_steel_appliances",
+      "label": "Stainless Steel Appliances",
+      "group": "Kitchen / Bath",
+      "row": 239,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "walk_in_showers",
+      "label": "Walk-in Showers",
+      "group": "Kitchen / Bath",
+      "row": 240,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "business_center",
+      "label": "Business Center",
+      "group": "Services",
+      "row": 242,
+      "type": "tri",
+      "hellodata": "business_center"
+    },
+    {
+      "key": "corporate_units",
+      "label": "Corporate Units",
+      "group": "Services",
+      "row": 243,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "doorman",
+      "label": "Doorman",
+      "group": "Services",
+      "row": 244,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "package_delivery",
+      "label": "Package Delivery",
+      "group": "Services",
+      "row": 245,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "valet_trash",
+      "label": "Valet Trash",
+      "group": "Services",
+      "row": 246,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "recycling",
+      "label": "Recycling",
+      "group": "Services",
+      "row": 247,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "all_bills_paid",
+      "label": "All Bills Paid",
+      "group": "Utilities",
+      "row": 249,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "commercial_electric",
+      "label": "Commercial Electric",
+      "group": "Utilities",
+      "row": 250,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "insurance_required",
+      "label": "Insurance Required",
+      "group": "Utilities",
+      "row": 251,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "tenant_trash",
+      "label": "Tenant Trash",
+      "group": "Property Allocated Expenses",
+      "row": 253,
+      "type": "alloc",
+      "options": [
+        "To Property",
+        "To City/Utility"
+      ],
+      "hellodata": null
+    },
+    {
+      "key": "tenant_water",
+      "label": "Tenant Water",
+      "group": "Property Allocated Expenses",
+      "row": 254,
+      "type": "alloc",
+      "options": [
+        "To Property",
+        "To City/Utility"
+      ],
+      "hellodata": null
+    },
+    {
+      "key": "tenant_gas",
+      "label": "Tenant Gas",
+      "group": "Property Allocated Expenses",
+      "row": 255,
+      "type": "alloc",
+      "options": [
+        "To Property",
+        "To City/Utility"
+      ],
+      "hellodata": null
+    },
+    {
+      "key": "tenant_electric",
+      "label": "Tenant Electric",
+      "group": "Property Allocated Expenses",
+      "row": 256,
+      "type": "alloc",
+      "options": [
+        "To Property",
+        "To City/Utility"
+      ],
+      "hellodata": null
+    },
+    {
+      "key": "tenant_cable",
+      "label": "Tenant Cable",
+      "group": "Property Allocated Expenses",
+      "row": 257,
+      "type": "alloc",
+      "options": [
+        "To Property",
+        "To City/Utility"
+      ],
+      "hellodata": null
+    },
+    {
+      "key": "fiber_optic_cable",
+      "label": "Fiber Optic Cable",
+      "group": "Internet / Broadband",
+      "row": 259,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "satellite",
+      "label": "Satellite",
+      "group": "Internet / Broadband",
+      "row": 260,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "gated",
+      "label": "Access Gates (Driving)",
+      "group": "Security",
+      "row": 262,
+      "type": "tri",
+      "hellodata": "gated_community_access"
+    },
+    {
+      "key": "alarm_systems",
+      "label": "Alarm Systems",
+      "group": "Security",
+      "row": 263,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "courtesy_patrol",
+      "label": "Courtesy Patrol",
+      "group": "Security",
+      "row": 264,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "limited_building_access",
+      "label": "Limited Building Access",
+      "group": "Security",
+      "row": 265,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "video_surveillance",
+      "label": "Video Surveillance",
+      "group": "Security",
+      "row": 266,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "pets_accepted",
+      "label": "Pets Accepted",
+      "group": "Pets",
+      "row": 268,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "large_pets",
+      "label": "Large Pets",
+      "group": "Pets",
+      "row": 269,
+      "type": "tri",
+      "hellodata": null
+    },
+    {
+      "key": "pets_policy",
+      "label": "Pets Policy",
+      "group": "Pets",
+      "row": 270,
+      "type": "text",
+      "hellodata": null
     }
   ],
   "categories": [
@@ -950,123 +1494,666 @@ window.SCHEMA = {
     "_unitBucketsNote": "Same 7 sections, same compsLabel text, as MF — 'UNITS is byte-identical to v37' per the v38 changelog, i.e. ExStay's grid never grew past its original 9-row-per-section shape (63 plan rows/comp total) the way MF's did on v41. Rows verified live: subtotal labels '+Eff'/'+1/1(.5)'/.../'+4/2(.5)' found at 15/25/35/45/55/65/75, each exactly endRow+1, each bucket's startRow exactly prev subtotal + 1, last subtotal (75) + 1 = rowTotals (76).",
     "physical": [
       {
+        "key": "property_type",
+        "label": "Property Type",
+        "group": "Building",
+        "row": 116,
+        "type": "text",
+        "hellodata": null
+      },
+      {
+        "key": "stories",
+        "label": "Stories",
+        "group": "Building",
+        "row": 117,
+        "type": "number",
+        "hellodata": null
+      },
+      {
+        "key": "residential_buildings",
+        "label": "Residential Buildings",
+        "group": "Building",
+        "row": 118,
+        "type": "number",
+        "hellodata": null
+      },
+      {
+        "key": "renovated_year",
+        "label": "Renovated - Year",
+        "group": "Building",
+        "row": 119,
+        "type": "number",
+        "hellodata": null
+      },
+      {
+        "key": "renovated_scope",
+        "label": "Renovated - Scope",
+        "group": "Building",
+        "row": 120,
+        "type": "text",
+        "hellodata": null
+      },
+      {
         "key": "hvac_indiv",
         "label": "HVAC Indiv.",
+        "group": "Unit Systems",
         "row": 122,
+        "type": "tri",
         "hellodata": "central_air_conditioning"
       },
       {
         "key": "wd_inunit",
         "label": "W/D In-Unit",
+        "group": "Unit Systems",
         "row": 123,
+        "type": "tri",
         "hellodata": "washer_dryer_in_unit"
       },
       {
         "key": "wd_hookups",
         "label": "W/D Hookups",
+        "group": "Unit Systems",
         "row": 124,
+        "type": "tri",
         "hellodata": "washer_dryer_hookups"
       },
       {
         "key": "water_util",
         "label": "Water Util.",
+        "group": "Unit Systems",
         "row": 125,
+        "type": "tri",
         "hellodata": null
       },
       {
         "key": "gas_util",
         "label": "Gas Util.",
+        "group": "Unit Systems",
         "row": 126,
+        "type": "tri",
         "hellodata": null
       },
       {
         "key": "elec_util",
         "label": "Elec. Util.",
+        "group": "Unit Systems",
         "row": 127,
+        "type": "tri",
         "hellodata": null
       },
       {
         "key": "roof_type",
         "label": "Roof Type",
+        "group": "Unit Systems",
         "row": 128,
+        "type": "text",
         "hellodata": null
       },
       {
         "key": "priv_yards",
         "label": "Priv. Yards",
+        "group": "Unit Systems",
         "row": 129,
+        "type": "tri",
         "hellodata": "patio_or_balcony"
       },
       {
         "key": "indiv_hwh",
         "label": "Indiv. HWH",
+        "group": "Unit Systems",
         "row": 130,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "lease_terms",
+        "label": "Lease Terms",
+        "group": "Terms",
+        "row": 132,
+        "type": "text",
+        "hellodata": null
+      },
+      {
+        "key": "locator_commission",
+        "label": "Locator Commission",
+        "group": "Terms",
+        "row": 133,
+        "type": "text",
+        "hellodata": null
+      },
+      {
+        "key": "views",
+        "label": "Views",
+        "group": "Terms",
+        "row": 134,
+        "type": "text",
+        "hellodata": null
+      },
+      {
+        "key": "specials",
+        "label": "Specials",
+        "group": "Terms",
+        "row": 135,
+        "type": "text",
+        "hellodata": null
+      },
+      {
+        "key": "other_notes",
+        "label": "Other Notes",
+        "group": "Terms",
+        "row": 136,
+        "type": "text",
+        "hellodata": null
+      },
+      {
+        "key": "near_transit",
+        "label": "Near Transit",
+        "group": "Location",
+        "row": 138,
+        "type": "tri",
         "hellodata": null
       }
     ],
-    "_physicalNote": "Same 9 keys, same labels, same hellodata crosswalk as the top-level MF list (the label vocabulary was copied verbatim from MF v44's own COMPS!B199:DL269 range paste — see changelog §1). Only the rows moved: they now live inside the Physical band's 'Unit Systems' sub-group at rows 122-130 (Physical band overall: 115-138), verified live against SHIR_ExStay_Template_v38.xlsx.",
+    "_physicalNote": "ExStay v38's copy of the same 20-field, 4-sub-group Physical vocabulary as MF — the label set was copied verbatim from MF v44 (changelog §1), so the structure is identical and only the rows differ. Resolved live out of SHIR_ExStay_Template_v38.xlsx by label, independently of MF; the constant 86-row delta between the two families is asserted afterwards as a cross-check, never used as the source. See the top-level _physicalNote for the typing rules and the pre-existing-key guarantee.",
     "amenities": [
       {
-        "key": "fitness_center",
-        "label": "Fitness Room / Gym",
-        "row": 123,
-        "hellodata": "fitness_center"
+        "key": "elevators",
+        "label": "Elevators",
+        "group": "Building & Common",
+        "row": 116,
+        "type": "tri",
+        "hellodata": null
       },
       {
-        "key": "clubhouse",
-        "label": "Clubroom",
-        "row": 121,
-        "hellodata": "club_house_party_room"
+        "key": "num_common_laundry_rms",
+        "label": "# Common Laundry Rms",
+        "group": "Building & Common",
+        "row": 117,
+        "type": "count",
+        "hellodata": null
       },
       {
-        "key": "business_center",
-        "label": "Business Center",
-        "row": 156,
-        "hellodata": "business_center"
-      },
-      {
-        "key": "pool",
-        "label": "# of Pools",
-        "row": 130,
-        "hellodata": "swimming_pool",
-        "lossy": true,
-        "valueType": "count",
-        "note": "Same v44 change as MF — Y/N amenity became a pool COUNT. A truthy HelloData flag writes 1 (a floor on the real count, not a reading), never 'Y'."
-      },
-      {
-        "key": "dog_park",
-        "label": "Dog Park",
-        "row": 122,
-        "hellodata": "dog_park"
-      },
-      {
-        "key": "bbq_grill",
-        "label": "Grill(s)",
-        "row": 124,
-        "hellodata": "barbecue_grill"
-      },
-      {
-        "key": "gated",
-        "label": "Access Gates (Driving)",
-        "row": 176,
-        "hellodata": "gated_community_access"
+        "key": "24hr_fitness_room",
+        "label": "24hr Fitness Room",
+        "group": "Activity / Lifestyle",
+        "row": 119,
+        "type": "tri",
+        "hellodata": null
       },
       {
         "key": "sport_court",
         "label": "Basketball Court",
+        "group": "Activity / Lifestyle",
         "row": 120,
+        "type": "tri",
         "hellodata": "basketball_court",
         "lossy": true,
-        "note": "Same v44 change as MF — the old generic 'Sport Court' splits three ways (Basketball Court / Volleyball / # of Tennis Courts); this key routes to Basketball Court only."
+        "note": "v44 splits the old generic 'Sport Court' three ways (Basketball Court / Volleyball / # of Tennis Courts); this key routes to Basketball Court only."
+      },
+      {
+        "key": "clubhouse",
+        "label": "Clubroom",
+        "group": "Activity / Lifestyle",
+        "row": 121,
+        "type": "tri",
+        "hellodata": "club_house_party_room"
+      },
+      {
+        "key": "dog_park",
+        "label": "Dog Park",
+        "group": "Activity / Lifestyle",
+        "row": 122,
+        "type": "tri",
+        "hellodata": "dog_park"
+      },
+      {
+        "key": "fitness_center",
+        "label": "Fitness Room / Gym",
+        "group": "Activity / Lifestyle",
+        "row": 123,
+        "type": "tri",
+        "hellodata": "fitness_center"
+      },
+      {
+        "key": "bbq_grill",
+        "label": "Grill(s)",
+        "group": "Activity / Lifestyle",
+        "row": 124,
+        "type": "tri",
+        "hellodata": "barbecue_grill"
+      },
+      {
+        "key": "hot_tub_jacuzzi",
+        "label": "Hot Tub / Jacuzzi",
+        "group": "Activity / Lifestyle",
+        "row": 125,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "jogging_trail",
+        "label": "Jogging Trail",
+        "group": "Activity / Lifestyle",
+        "row": 126,
+        "type": "tri",
+        "hellodata": null
       },
       {
         "key": "playground",
         "label": "Playground",
+        "group": "Activity / Lifestyle",
         "row": 127,
+        "type": "tri",
         "hellodata": "playground"
+      },
+      {
+        "key": "sauna",
+        "label": "Sauna",
+        "group": "Activity / Lifestyle",
+        "row": 128,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "volleyball",
+        "label": "Volleyball",
+        "group": "Activity / Lifestyle",
+        "row": 129,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "pool",
+        "label": "# of Pools",
+        "group": "Activity / Lifestyle",
+        "row": 130,
+        "type": "count",
+        "hellodata": "swimming_pool",
+        "lossy": true,
+        "note": "v44 changed this from a Y/N amenity to a pool COUNT. A truthy HelloData flag writes 1 (a floor on the real count, not a reading), never 'Y'."
+      },
+      {
+        "key": "num_of_tennis_courts",
+        "label": "# of Tennis Courts",
+        "group": "Activity / Lifestyle",
+        "row": 131,
+        "type": "count",
+        "hellodata": null
+      },
+      {
+        "key": "assigned_parking",
+        "label": "Assigned Parking",
+        "group": "Parking",
+        "row": 133,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "attached_garages",
+        "label": "Attached Garages",
+        "group": "Parking",
+        "row": 134,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "community_parking_garage",
+        "label": "Community Parking Garage",
+        "group": "Parking",
+        "row": 135,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "covered_parking",
+        "label": "Covered Parking",
+        "group": "Parking",
+        "row": 136,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "detached_garages",
+        "label": "Detached Garages",
+        "group": "Parking",
+        "row": 137,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "ev_charging_stations",
+        "label": "EV Charging Stations",
+        "group": "Parking",
+        "row": 138,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "extra_storage",
+        "label": "Extra Storage",
+        "group": "Floorplan",
+        "row": 140,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "fireplaces",
+        "label": "Fireplaces",
+        "group": "Floorplan",
+        "row": 141,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "hardwood_floors",
+        "label": "Hardwood Floors",
+        "group": "Floorplan",
+        "row": 142,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "high_ceilings",
+        "label": "High Ceilings",
+        "group": "Floorplan",
+        "row": 143,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "patio_balcony",
+        "label": "Patio / Balcony",
+        "group": "Floorplan",
+        "row": 144,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "private_yards",
+        "label": "Private Yards",
+        "group": "Floorplan",
+        "row": 145,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "w_d_connections",
+        "label": "W/D Connections",
+        "group": "Floorplan",
+        "row": 146,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "w_d_provided",
+        "label": "W/D Provided",
+        "group": "Floorplan",
+        "row": 147,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "walk_in_closets",
+        "label": "Walk-in Closets",
+        "group": "Floorplan",
+        "row": 148,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "dishwashers",
+        "label": "Dishwashers",
+        "group": "Kitchen / Bath",
+        "row": 150,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "granite_stone_countertops",
+        "label": "Granite / Stone Countertops",
+        "group": "Kitchen / Bath",
+        "row": 151,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "pantry",
+        "label": "Pantry",
+        "group": "Kitchen / Bath",
+        "row": 152,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "stainless_steel_appliances",
+        "label": "Stainless Steel Appliances",
+        "group": "Kitchen / Bath",
+        "row": 153,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "walk_in_showers",
+        "label": "Walk-in Showers",
+        "group": "Kitchen / Bath",
+        "row": 154,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "business_center",
+        "label": "Business Center",
+        "group": "Services",
+        "row": 156,
+        "type": "tri",
+        "hellodata": "business_center"
+      },
+      {
+        "key": "corporate_units",
+        "label": "Corporate Units",
+        "group": "Services",
+        "row": 157,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "doorman",
+        "label": "Doorman",
+        "group": "Services",
+        "row": 158,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "package_delivery",
+        "label": "Package Delivery",
+        "group": "Services",
+        "row": 159,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "valet_trash",
+        "label": "Valet Trash",
+        "group": "Services",
+        "row": 160,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "recycling",
+        "label": "Recycling",
+        "group": "Services",
+        "row": 161,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "all_bills_paid",
+        "label": "All Bills Paid",
+        "group": "Utilities",
+        "row": 163,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "commercial_electric",
+        "label": "Commercial Electric",
+        "group": "Utilities",
+        "row": 164,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "insurance_required",
+        "label": "Insurance Required",
+        "group": "Utilities",
+        "row": 165,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "tenant_trash",
+        "label": "Tenant Trash",
+        "group": "Property Allocated Expenses",
+        "row": 167,
+        "type": "alloc",
+        "options": [
+          "To Property",
+          "To City/Utility"
+        ],
+        "hellodata": null
+      },
+      {
+        "key": "tenant_water",
+        "label": "Tenant Water",
+        "group": "Property Allocated Expenses",
+        "row": 168,
+        "type": "alloc",
+        "options": [
+          "To Property",
+          "To City/Utility"
+        ],
+        "hellodata": null
+      },
+      {
+        "key": "tenant_gas",
+        "label": "Tenant Gas",
+        "group": "Property Allocated Expenses",
+        "row": 169,
+        "type": "alloc",
+        "options": [
+          "To Property",
+          "To City/Utility"
+        ],
+        "hellodata": null
+      },
+      {
+        "key": "tenant_electric",
+        "label": "Tenant Electric",
+        "group": "Property Allocated Expenses",
+        "row": 170,
+        "type": "alloc",
+        "options": [
+          "To Property",
+          "To City/Utility"
+        ],
+        "hellodata": null
+      },
+      {
+        "key": "tenant_cable",
+        "label": "Tenant Cable",
+        "group": "Property Allocated Expenses",
+        "row": 171,
+        "type": "alloc",
+        "options": [
+          "To Property",
+          "To City/Utility"
+        ],
+        "hellodata": null
+      },
+      {
+        "key": "fiber_optic_cable",
+        "label": "Fiber Optic Cable",
+        "group": "Internet / Broadband",
+        "row": 173,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "satellite",
+        "label": "Satellite",
+        "group": "Internet / Broadband",
+        "row": 174,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "gated",
+        "label": "Access Gates (Driving)",
+        "group": "Security",
+        "row": 176,
+        "type": "tri",
+        "hellodata": "gated_community_access"
+      },
+      {
+        "key": "alarm_systems",
+        "label": "Alarm Systems",
+        "group": "Security",
+        "row": 177,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "courtesy_patrol",
+        "label": "Courtesy Patrol",
+        "group": "Security",
+        "row": 178,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "limited_building_access",
+        "label": "Limited Building Access",
+        "group": "Security",
+        "row": 179,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "video_surveillance",
+        "label": "Video Surveillance",
+        "group": "Security",
+        "row": 180,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "pets_accepted",
+        "label": "Pets Accepted",
+        "group": "Pets",
+        "row": 182,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "large_pets",
+        "label": "Large Pets",
+        "group": "Pets",
+        "row": 183,
+        "type": "tri",
+        "hellodata": null
+      },
+      {
+        "key": "pets_policy",
+        "label": "Pets Policy",
+        "group": "Pets",
+        "row": 184,
+        "type": "text",
+        "hellodata": null
       }
     ],
-    "_amenitiesNote": "Same 9 keys, same labels, same lossy crosswalk as the top-level MF list — the 59-item vocabulary and 11 sub-group headers were copied verbatim from MF v44 (see changelog §1), so the crosswalk logic is identical. Rows are NOT contiguous (scattered across the 70-row band, 115-184, interleaved with sub-group headers and the ~50 amenity items this schema does not track) — verified live against SHIR_ExStay_Template_v38.xlsx, band-membership only, never a fixed anchor + index, same as MF.",
+    "_amenitiesNote": "ExStay v38's copy of the same 59-field, 11-sub-group Amenity vocabulary as MF, resolved live out of SHIR_ExStay_Template_v38.xlsx by label and cross-checked against MF's rows for the constant 86-row delta. See the top-level _amenitiesNote.",
     "pasteMap": {
       "sheetName": "COMPS_PASTE",
       "dashSheetName": "DASH_PASTE",
