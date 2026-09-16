@@ -265,17 +265,17 @@ function buildPopulatorPayload() {
   return {
     skill_chain: 'rent-comps-tracker -> rent-comp-data-populator (populate_comps.py --skip-fetch)',
     generator: 'rent-comps-tracker',
-    /* Geometry stamp — v41+ (live: v44) rebuilt the shared 9-row attribute band into
+    /* Geometry stamp — v41+ (live: v45) rebuilt the shared 9-row attribute band into
        three independently-sized Physical/Amenities/FEES bands; v3-v40 (and every
-       current ExStay template) still share one 9-row band. populate_comps-v44.py's
+       current ExStay template) still share one 9-row band. populate_comps-v45.py's
        own dispatcher resolves either from the workbook's labels — see its module
        docstring. An older populator (v43 and before) correctly REFUSES to write a
        v41+ workbook rather than write to the wrong rows. */
-    template_version: TAB.templateVersion || 'SHIR_MF_Template_v44',
+    template_version: TAB.templateVersion || 'SHIR_MF_Template_v45',
     /* Keep this fallback at the CURRENT floor, not the historical one. It fires only
        when schema.js failed to load, and a stale value here is the one failure the
        analyst cannot see. Bump it in lockstep with comps_schema.json. */
-    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v44.py',
+    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v45.py',
     generated_at: nowISO(),
     generated_by: (CURRENT_USER && CURRENT_USER.email) || '',
     property_url: APP_BASE_URL + propertyHash(STATE).replace(/^#/, '#'),
@@ -626,7 +626,7 @@ async function buildCompsWorkbook() {
   {
     const ws = wb.addWorksheet('COMPS Cell Map');
     const heads = ['Cell', 'Row', 'Col', 'Belongs To', 'Field', 'Value'];
-    titleRow(ws, `COMPS TAB CELL MAP — what ${TAB.populatorScript || 'populate_comps'} writes — ${TAB.templateVersion || 'SHIR_MF_Template_v44'}`, heads.length);
+    titleRow(ws, `COMPS TAB CELL MAP — what ${TAB.populatorScript || 'populate_comps'} writes — ${TAB.templateVersion || 'SHIR_MF_Template_v45'}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
@@ -901,21 +901,21 @@ function renderPhase4() {
       <div class="card-head"><span class="grow">Then, on a machine with the proforma</span></div>
       <div class="card-body">
         <div class="muted small">Run the proven populator against the deal's proforma:</div>
-        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comps Unified Skill\\scripts\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v44.py')}" ^
+        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MFVAPF - Rent Comps Unified Skill\\scripts\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v45.py')}" ^
   "&lt;proforma_in.xlsx&gt;" "&lt;proforma_out.xlsx&gt;" "${esc(exportFileBase())}.json" --skip-fetch</pre>
         <div class="tiny muted" style="margin-top:6px">
           Then reconcile the populated COMPS tab against the <b>COMPS Cell Map</b> sheet.<br/>
-          ⚠ This payload targets <b>${esc(TAB.templateVersion || 'SHIR_MF_Template_v44')}</b> geometry, resolved
+          ⚠ This payload targets <b>${esc(TAB.templateVersion || 'SHIR_MF_Template_v45')}</b> geometry, resolved
           by the populator's own by-label dispatcher: Physical ${esc(TAB.physRowFirst)}–${esc(TAB.physRowLast)},
           Amenities ${esc(TAB.amenRowFirst)}–${esc(TAB.amenRowLast)}, FEES ${esc(TAB.feeRowFirst)}–${esc(TAB.feeRowLast)}
           (Eff. $/Mo sums through row ${esc(TAB.feeSumLastRow)}), row 4 = year · units · distance · vacancy · concession.<br/>
-          <b>Use v44</b> (rent-comp-data-populator-populate_comps-v44.py). It resolves BOTH this independent-band
+          <b>Use v45</b> (rent-comp-data-populator-populate_comps-v45.py). It resolves BOTH this independent-band
           geometry (SHIR_MF_Template_v41 and later) and the older shared-band geometry (v3–v40, and every
           current ExStay template) from the workbook's own labels, so it is safe to run against any live
           template — no version needs to be picked by hand.
           <b>Every earlier populator (v43 and before) correctly REFUSES to write a v41+ workbook</b> rather
           than write to the wrong rows — that is a safety guard doing its job, not a bug, but it means only
-          v44 can complete a run against the current template.
+          v44 and later can complete a run against the current template.
         </div>
       </div>
     </div>`;

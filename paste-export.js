@@ -447,7 +447,7 @@ function pxReadTarget(buf, fileName) {
     if (nm) slotByName[pxNorm(nm)] = i;
     const labels = {};
     /* Fee labels live only in the FEES Mandatory band (feeRowFirst..feeRowLast
-       = 201-205 on v44) — scanning the old shared attrRowFirst..attrRowLast
+       = 202-206 on v45) — scanning the old shared attrRowFirst..attrRowLast
        span would also walk Physical/Amenities rows that never carry a fee
        label at this column and cost nothing extra, but the fee band is the
        only span with actual meaning here now that the three bands diverge. */
@@ -536,7 +536,7 @@ async function pxBuildWorkbook(mirror) {
       + 'Without that tick the paste will destroy the subtotal rows, the Eff. $/Mo columns and column B’s array formula. It is not optional.', true);
     line('IT CANNOT CLEAR', 'A paste can set and overwrite but never empty a cell. If a comp slot already holds data, do the CLEAR FIRST sheet first.', true);
     ws.addRow([]);
-    line('Built against', TAB.templateVersion || 'SHIR_MF_Template_v44');
+    line('Built against', TAB.templateVersion || 'SHIR_MF_Template_v45');
     line('Mode', mirror.aligned
       ? 'ALIGNED to ' + mirror.tgt.fileName + ' — fee rows and subject plan rows resolved against that workbook'
       : 'GENERIC — no workbook attached. Per-plan market rents are NOT written and fee labels use the template default rows.');
