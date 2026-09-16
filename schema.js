@@ -765,5 +765,383 @@ window.SCHEMA = {
     "font": "Arial Narrow",
     "fontSize": 11,
     "tabColorDone": "33CC33"
+  },
+  "_exstayNote": "Added 2026-09-15. `compsTab` (top-level) through this point is MF-only and stays exactly as-is — untouched, so nothing about live MF capture changes. `SHIR_ExStay_Template_v38` ported MF v44's independent-band COMPS attribute-block redesign onto ExStay (see SHIR_ExStay_Template_v38_CHANGELOG.md in TEMPLATES\\EXStay Proforma Template Excel\\), but landed it at DIFFERENT ROW NUMBERS (attribute header row 114, not 199) and kept the concession roll-up at its legacy R:W columns (not MF's J:O) — a genuine family branch, not a constant swap. This 'exstay' block is a fully self-contained sibling of the top-level compsTab/unitBuckets/physical/amenities/pasteMap — same shapes, same field names, same label vocabulary and hellodata crosswalk (verbatim-copied from MF v44 per the changelog), only the row numbers and rollup columns differ. Kept as an ADDITIVE sibling rather than folding both families into one nested structure so existing webapp/build/verify code that reads top-level compsTab keeps working for MF unmodified; consuming a family other than MF is left to a later webapp-wiring pass (paste-export.js / app.js do not yet select 'exstay' — this ships the schema + build_schema.py/verify_against_template.py support only, per the 2026-09-15 task scope). Fees vocabulary (`fees`/`feeVocabulary`) and Tracker-UI-only vocab (`categories`/`wdTypes`/`utilStructures`/`renoLevels`/`sources`/`subjectFields`/`compFields`/`compExtraFields`/`brand`) are SHARED across both families — none of those reference a COMPS row, and the FEES dropdown + label vocabulary were copied verbatim from the same MF v44 source, so there is nothing family-specific to duplicate. Every row/column number below was read live off SHIR_ExStay_Template_v38.xlsx's COMPS sheet (label-by-label, the same method resolve_comps_geometry() in populate_comps-v45.py uses), not transcribed from the changelog prose alone — verify_against_template.py's exstay pass re-confirms this on every run.",
+  "exstay": {
+    "compsTab": {
+      "_note": "Row map verified live against SHIR_ExStay_Template_v38.xlsx on 2026-09-15 (row_totals=76, row_comp_type=77, row_phys_header=114, layout='new' — same dispatcher tag as MF v41+ since row 115 col Y reads 'Building', not 'HVAC Indiv.'). Column layout (compBaseCols, compBlockWidth, all `offsets`) is IDENTICAL to MF — only rows moved. The concession roll-up stayed at its legacy R:W columns (rollupCols below) instead of moving to MF's J:O — confirmed live and called out explicitly in populate_comps-v45.py's module docstring (the v44.1 fix) and the v38 changelog §1's reference table.",
+      "templateVersion": "SHIR_ExStay_Template_v38",
+      "populatorScript": "rent-comp-data-populator-populate_comps-v45.py",
+      "compBaseCols": [
+        25,
+        34,
+        43,
+        52,
+        61,
+        70,
+        79,
+        88
+      ],
+      "compBlockWidth": 9,
+      "maxComps": 8,
+      "templateSlots": 10,
+      "templateSlotBaseCols": [
+        25,
+        34,
+        43,
+        52,
+        61,
+        70,
+        79,
+        88,
+        97,
+        106
+      ],
+      "reservedSlotNote": "Same reservation as MF (see compsTab.reservedSlotNote above) — the populator script and its pristine-serial-restore logic are shared across both families.",
+      "rowHeader": 3,
+      "rowDetails": 4,
+      "rowColHeaders": 5,
+      "rowTotals": 76,
+      "rowCompType": 77,
+      "rowAttrHeader": 114,
+      "_bandNote": "The three attribute bands share their header row (114) and first data row (115) but are INDEPENDENTLY SIZED below that, exactly like MF v41+ — never derive one band's span from another's. Resolved live against SHIR_ExStay_Template_v38.xlsx by label, not re-derived by hand.",
+      "physRowFirst": 115,
+      "physRowLast": 138,
+      "amenRowFirst": 115,
+      "amenRowLast": 184,
+      "feeMandatoryHeaderRow": 115,
+      "feeRowFirst": 116,
+      "feeRowLast": 120,
+      "feeSumLastRow": 120,
+      "_feeSumLastRowNote": "Same v41+ shape as MF: the Mandatory band has no trailing unlabelled row past feeRowLast — all 5 rows (116-120; 3 pre-labelled Amenity/Cable-Internet/Cleaning + 2 blank-but-labelable via the dropdown) sit inside feeRowFirst..feeRowLast, and the changelog's §1 'What had to be fixed explicitly' documents the Eff. $/Mo formulas being rewritten to SUM($<col>$116:$<col>$120) per comp, matching this span.",
+      "feeOptionalHeaderRow": 121,
+      "feeOptionalFirst": 122,
+      "feeOptionalLast": 126,
+      "feeOneTimeHeaderRow": 127,
+      "feeOneTimeFirst": 128,
+      "feeOneTimeLast": 132,
+      "_feeOptionalOneTimeNote": "Optional Fees (122-126) and One-Time Fees (128-132) exist on the template but do NOT feed Eff. $/Mo and are out of scope for this pass, same as MF. Only 3 of One-Time's 5 rows carry a pre-printed label live (Application Fee/Admin Fee/Pet Deposit, rows 128-130); 131-132 are blank continuations of the same band, mirroring the Mandatory band's 2 blank dropdown slots.",
+      "subjectMktRentCol": 7,
+      "subjectUnitCountCol": 3,
+      "rollupCols": {
+        "index": 18,
+        "name": 19,
+        "units": 20,
+        "conc": 21,
+        "concPct": 22,
+        "incl": 23,
+        "_note": "R:W — the legacy position, UNCHANGED from pre-v38. MF's own v41+ port moved this roll-up to J:O; ExStay's v38 port did not follow that part of MF's design (column position was never in scope for this port — see changelog §1 reference table and populate_comps-v45.py's v44.1 fix). Header row 101 (verified live): '#'/'Comp Name'/'# Units'/'Conc $'/'Conc %'/'Incl?' at R/S/T/U/V/W; data rows 102-111 (10 comp slots); Wtd Avg Concession at 112; Suggested Subject Concession at 113.",
+        "headerRow": 101,
+        "firstRow": 102,
+        "lastRow": 111,
+        "wtdAvgRow": 112,
+        "suggestedRow": 113
+      },
+      "offsets": {
+        "compNum": 0,
+        "compName": 1,
+        "compAddress": 7,
+        "yearBuilt": 0,
+        "totalUnits": 1,
+        "distanceMiles": 2,
+        "vacancyPct": 3,
+        "concessionDollars": 4,
+        "concessionPct": 5,
+        "wdType": 6,
+        "utilStructure": 7,
+        "unitRowNum": 0,
+        "unitCount": 1,
+        "unitSf": 2,
+        "unitOccPct": 3,
+        "unitAskRent": 4,
+        "unitAskPsf": 5,
+        "unitEffRent": 6,
+        "unitEffPsf": 7,
+        "compTypeValue": 2,
+        "compSourceValue": 5,
+        "compSourceLegacyValue": 4,
+        "physicalValue": 2,
+        "amenityValue": 5,
+        "feeLabel": 6,
+        "feeValue": 7
+      },
+      "_offsetsNote": "Byte-identical to the top-level MF offsets — verified live (row 4/5 headers and comp1 row 3/4/5 all matched the same offset convention on SHIR_ExStay_Template_v38.xlsx). Only the ROW numbers moved; ExStay never diverged from MF's column layout."
+    },
+    "unitBuckets": [
+      {
+        "key": "efficiency",
+        "label": "Efficiency / Studio",
+        "short": "Eff",
+        "compsLabel": "+Eff",
+        "startRow": 6,
+        "endRow": 14,
+        "subtotalRow": 15,
+        "beds": 0,
+        "baths": 1
+      },
+      {
+        "key": "1br1ba",
+        "label": "1BR / 1BA",
+        "short": "1x1",
+        "compsLabel": "+1/1(.5)",
+        "startRow": 16,
+        "endRow": 24,
+        "subtotalRow": 25,
+        "beds": 1,
+        "baths": 1
+      },
+      {
+        "key": "2br1ba",
+        "label": "2BR / 1BA",
+        "short": "2x1",
+        "compsLabel": "+2x1(.5)",
+        "startRow": 26,
+        "endRow": 34,
+        "subtotalRow": 35,
+        "beds": 2,
+        "baths": 1
+      },
+      {
+        "key": "2br2ba",
+        "label": "2BR / 2BA",
+        "short": "2x2",
+        "compsLabel": "+2x2(.5)",
+        "startRow": 36,
+        "endRow": 44,
+        "subtotalRow": 45,
+        "beds": 2,
+        "baths": 2
+      },
+      {
+        "key": "3br1ba",
+        "label": "3BR / 1BA",
+        "short": "3x1",
+        "compsLabel": "+3/1(.5)",
+        "startRow": 46,
+        "endRow": 54,
+        "subtotalRow": 55,
+        "beds": 3,
+        "baths": 1
+      },
+      {
+        "key": "3br2ba",
+        "label": "3BR / 2BA",
+        "short": "3x2",
+        "compsLabel": "+3/2(.5)",
+        "startRow": 56,
+        "endRow": 64,
+        "subtotalRow": 65,
+        "beds": 3,
+        "baths": 2
+      },
+      {
+        "key": "4br2ba",
+        "label": "4BR / 2BA",
+        "short": "4x2",
+        "compsLabel": "+4/2(.5)",
+        "startRow": 66,
+        "endRow": 74,
+        "subtotalRow": 75,
+        "beds": 4,
+        "baths": 2
+      }
+    ],
+    "_unitBucketsNote": "Same 7 sections, same compsLabel text, as MF — 'UNITS is byte-identical to v37' per the v38 changelog, i.e. ExStay's grid never grew past its original 9-row-per-section shape (63 plan rows/comp total) the way MF's did on v41. Rows verified live: subtotal labels '+Eff'/'+1/1(.5)'/.../'+4/2(.5)' found at 15/25/35/45/55/65/75, each exactly endRow+1, each bucket's startRow exactly prev subtotal + 1, last subtotal (75) + 1 = rowTotals (76).",
+    "physical": [
+      {
+        "key": "hvac_indiv",
+        "label": "HVAC Indiv.",
+        "row": 122,
+        "hellodata": "central_air_conditioning"
+      },
+      {
+        "key": "wd_inunit",
+        "label": "W/D In-Unit",
+        "row": 123,
+        "hellodata": "washer_dryer_in_unit"
+      },
+      {
+        "key": "wd_hookups",
+        "label": "W/D Hookups",
+        "row": 124,
+        "hellodata": "washer_dryer_hookups"
+      },
+      {
+        "key": "water_util",
+        "label": "Water Util.",
+        "row": 125,
+        "hellodata": null
+      },
+      {
+        "key": "gas_util",
+        "label": "Gas Util.",
+        "row": 126,
+        "hellodata": null
+      },
+      {
+        "key": "elec_util",
+        "label": "Elec. Util.",
+        "row": 127,
+        "hellodata": null
+      },
+      {
+        "key": "roof_type",
+        "label": "Roof Type",
+        "row": 128,
+        "hellodata": null
+      },
+      {
+        "key": "priv_yards",
+        "label": "Priv. Yards",
+        "row": 129,
+        "hellodata": "patio_or_balcony"
+      },
+      {
+        "key": "indiv_hwh",
+        "label": "Indiv. HWH",
+        "row": 130,
+        "hellodata": null
+      }
+    ],
+    "_physicalNote": "Same 9 keys, same labels, same hellodata crosswalk as the top-level MF list (the label vocabulary was copied verbatim from MF v44's own COMPS!B199:DL269 range paste — see changelog §1). Only the rows moved: they now live inside the Physical band's 'Unit Systems' sub-group at rows 122-130 (Physical band overall: 115-138), verified live against SHIR_ExStay_Template_v38.xlsx.",
+    "amenities": [
+      {
+        "key": "fitness_center",
+        "label": "Fitness Room / Gym",
+        "row": 123,
+        "hellodata": "fitness_center"
+      },
+      {
+        "key": "clubhouse",
+        "label": "Clubroom",
+        "row": 121,
+        "hellodata": "club_house_party_room"
+      },
+      {
+        "key": "business_center",
+        "label": "Business Center",
+        "row": 156,
+        "hellodata": "business_center"
+      },
+      {
+        "key": "pool",
+        "label": "# of Pools",
+        "row": 130,
+        "hellodata": "swimming_pool",
+        "lossy": true,
+        "valueType": "count",
+        "note": "Same v44 change as MF — Y/N amenity became a pool COUNT. A truthy HelloData flag writes 1 (a floor on the real count, not a reading), never 'Y'."
+      },
+      {
+        "key": "dog_park",
+        "label": "Dog Park",
+        "row": 122,
+        "hellodata": "dog_park"
+      },
+      {
+        "key": "bbq_grill",
+        "label": "Grill(s)",
+        "row": 124,
+        "hellodata": "barbecue_grill"
+      },
+      {
+        "key": "gated",
+        "label": "Access Gates (Driving)",
+        "row": 176,
+        "hellodata": "gated_community_access"
+      },
+      {
+        "key": "sport_court",
+        "label": "Basketball Court",
+        "row": 120,
+        "hellodata": "basketball_court",
+        "lossy": true,
+        "note": "Same v44 change as MF — the old generic 'Sport Court' splits three ways (Basketball Court / Volleyball / # of Tennis Courts); this key routes to Basketball Court only."
+      },
+      {
+        "key": "playground",
+        "label": "Playground",
+        "row": 127,
+        "hellodata": "playground"
+      }
+    ],
+    "_amenitiesNote": "Same 9 keys, same labels, same lossy crosswalk as the top-level MF list — the 59-item vocabulary and 11 sub-group headers were copied verbatim from MF v44 (see changelog §1), so the crosswalk logic is identical. Rows are NOT contiguous (scattered across the 70-row band, 115-184, interleaved with sub-group headers and the ~50 amenity items this schema does not track) — verified live against SHIR_ExStay_Template_v38.xlsx, band-membership only, never a fixed anchor + index, same as MF.",
+    "pasteMap": {
+      "sheetName": "COMPS_PASTE",
+      "dashSheetName": "DASH_PASTE",
+      "minRow": 3,
+      "regions": [
+        {
+          "key": "comps",
+          "name": "PASTE_COMPS",
+          "sheet": "COMPS_PASTE",
+          "range": "$Y$3:$DJ$184",
+          "anchor": "Y3",
+          "default": true,
+          "label": "All 8 comps — names, row 4, unit rows, type/source, attributes, fees"
+        },
+        {
+          "key": "subject",
+          "name": "PASTE_SUBJECT",
+          "sheet": "COMPS_PASTE",
+          "range": "$B$3:$H$184",
+          "anchor": "B3",
+          "default": true,
+          "label": "Subject — W/D, utilities, and per-plan market rents in column G"
+        },
+        {
+          "key": "dash",
+          "name": "PASTE_DASH",
+          "sheet": "DASH_PASTE",
+          "range": "$E$5:$E$9",
+          "anchor": "E5",
+          "default": false,
+          "label": "DASH — name, street, city/ST/zip, market, year built"
+        }
+      ],
+      "compWritable": {
+        "header": [
+          "compNum",
+          "compName",
+          "compAddress"
+        ],
+        "details": [
+          "yearBuilt",
+          "distanceMiles",
+          "vacancyPct",
+          "concessionDollars",
+          "wdType",
+          "utilStructure"
+        ],
+        "unit": [
+          "unitCount",
+          "unitSf",
+          "unitOccPct",
+          "unitAskRent"
+        ],
+        "compType": [
+          "compTypeValue",
+          "compSourceValue"
+        ],
+        "attr": [
+          "physicalValue",
+          "amenityValue",
+          "feeLabel",
+          "feeValue"
+        ]
+      },
+      "subjectWritable": {
+        "detailsCols": [
+          5,
+          7,
+          8
+        ],
+        "unitCols": [
+          7
+        ]
+      },
+      "_neverWriteNote": "Same shape as MF's pasteMap._neverWriteNote — row 2 is a live column-index chain, unit-row offsets 0/5/6/7 and every subtotal/rowTotals row is a formula, subject side only E4/G4/H4 and G6:G75 are inputs. Row bound is $DJ$184 here (amenRowLast, the tallest ExStay band) instead of MF's $DJ$269 — the same 'widen to the tallest band' rule, just a shorter tallest band.",
+      "_dashNote": "DASH!E5:E9 typed constants and the E10/E18/N5 formula wiring are unchanged between families — confirmed by row 4 on COMPS itself (=DASH!E9, =DASH!E10, =DASH!N5 all present and live on SHIR_ExStay_Template_v38.xlsx, same as MF)."
+    }
   }
 };
