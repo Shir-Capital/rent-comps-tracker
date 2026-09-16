@@ -196,6 +196,19 @@ main { padding: 10px 10px 96px; max-width: 900px; margin: 0 auto; }
 .card > .card-head .head-stat { font-size: 12px; font-weight: 500; opacity: .85; white-space: nowrap; }
 .card-pair > .card, .card-trio > .card { flex: 1 1 0; min-width: 0; }
 
+/* ---------------------------------- the attributes row (2026-09-16 layout)
+   Was three equal cards: Physical | Amenities | Fees. Once Physical went from 9
+   fields to 20 and Amenities from 9 to 59, the three columns were wildly uneven
+   — Amenities ran about three times the height of either neighbour and the row
+   was mostly white space on the right.
+
+   Now two columns: Physical with Fees tucked beneath it, and Amenities beside
+   them. Amenities gets the wider column and more pairs across, which is what
+   actually evens the two heights out — 59 items over more columns is fewer rows,
+   and its 11 sub-group headings are a fixed floor that no width can reduce. */
+.card-trio > .attr-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.card-trio > .attr-col > .card { flex: 0 0 auto; }
+
 /* Row actions inside a unit-mix line. Icons rather than words: the row is a
    table line, and "Delete plan" / "Duplicate" spelled out cost more width than
    every numeric column combined. Both keep a title + aria-label. */
@@ -960,13 +973,43 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   .fee-grid { grid-template-columns: minmax(0, 1fr) 92px; }
   .fee-cell input { min-height: 26px; padding: 2px 6px; }
 
-  /* Two label+indicator pairs across inside each of the three cards: nine items
-     become five rows instead of nine. Labels ellipsis rather than wrap, and
+  /* Label+indicator pairs across inside each card, so a sub-group of n items is
+     ceil(n / pairs) rows rather than n. Labels ellipsis rather than wrap, and
      every one carries a title so the full text is still reachable. */
   .card-trio .tri-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr) 58px);
     gap: 2px 7px;
   }
+  /* The column split is tuned to MEASURED heights, not to field counts. Rendered
+     at 1340px and read back off getBoundingClientRect(): Physical+Fees comes to
+     1005px and Amenities to 985px — a 2% difference, which is what "roughly the
+     same length" means here.
+
+     Why this particular shape rather than an even 50/50 at equal density: the
+     two sides do not scale the same way. Amenities' height is dominated by its
+     ELEVEN sub-group headings, which cost the same whatever the column width, so
+     widening it barely shortens it (3 pairs across = 985px, 4 across = 962px —
+     23px for four clipped labels). Physical is the adjustable one: dropping it
+     to a single pair across is what lifts it from 549px to 1005px to meet
+     Amenities, and it reads as a plain form list at that width.
+
+     Measured alternatives, for anyone tempted to "tidy" this: 50/50 at 3 across
+     both sides is 549 vs 985 (the original problem); 2 across on the left is 701
+     vs 985. Neither is close. */
+  .card-trio > .attr-col { flex: 0.6 1 0; }
+  .card-trio > .card { flex: 1 1 0; }
+  .card-trio > .attr-col .tri-grid,
+  .card-trio > .attr-col .fee-grid {
+    grid-template-columns: minmax(0, 1fr) 58px;
+  }
+  /* Amenities at three pairs across from 900px up, not 1200px as before. The old
+     1200px floor was sized for three pairs inside each of THREE equal cards;
+     with two columns Amenities is the wide one and three pairs fit far sooner.
+     Measured: the 2% balance holds at 1340 / 1200 / 1150 / 940. Leaving it at
+     1200 dropped Amenities to two-across below that and the row went to +25%.
+     Cost at the narrow end is 6 of 59 labels ellipsising at 940px — every one
+     carries a title, and 0 clip at 1150 and above. */
+  .card-trio > .card .tri-grid { grid-template-columns: repeat(3, minmax(0, 1fr) 58px); }
   .card-trio .tri-grid > .lbl { font-size: 12px; }
   .card-trio .tri button { font-size: 11px; padding: 2px 0; }
   .card-trio .fee-cell input { min-height: 24px; padding: 1px 5px; }
@@ -987,9 +1030,7 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   #phase-content.narrow { max-width: 900px; margin: 0 auto; }
 }
 
-/* Wide enough for three pairs across inside each of the three cards: nine
-   attributes collapse to three rows, which is what brings the whole comp back
-   under a 768px laptop fold. Below this the trio drops to two-across. */
-@media (min-width: 1200px) {
-  .card-trio .tri-grid { grid-template-columns: repeat(3, minmax(0, 1fr) 58px); }
-}
+/* The old `@media (min-width: 1200px)` three-across rule lived here. It is now
+   part of the 900px block above, because the two-column attributes row reaches
+   three pairs across much sooner than the old three-card row did. Nothing else
+   was in this query. */

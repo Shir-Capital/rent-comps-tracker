@@ -1178,7 +1178,8 @@ function renderCompEditor(compId) {
       </div>
     </div>
 
-    <div class="card-trio">
+    <div class="card-trio attr-row">
+      <div class="attr-col">
       <div class="card">
         <div class="card-head" title="Leave “—” when you don't know. A blank cell is an honest gap; “N” claims the comp positively lacks it.">
           <span class="grow">Physical Attributes</span>
@@ -1191,11 +1192,6 @@ function renderCompEditor(compId) {
       </div>
 
       <div class="card">
-        <div class="card-head"><span class="grow">Amenities</span></div>
-        <div class="card-body">${attrHtml(AMENITIES, c.amenities, path + '.amenities')}</div>
-      </div>
-
-      <div class="card">
         <div class="card-head" title="Charged to ALL tenants. Written to the COMPS FEES $/Mo column and fed into the template's Eff. $/Mo formulas. Leave blank when unknown — never guess.">
           <span class="grow">Fees</span><span class="head-stat">$/Mo</span>
         </div>
@@ -1204,6 +1200,12 @@ function renderCompEditor(compId) {
             Eff. $/Mo formulas. Leave blank when unknown; never guess.</div>
           ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsLabel), c.fees, path + '.fees')}
         </div>
+      </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><span class="grow">Amenities</span></div>
+        <div class="card-body">${attrHtml(AMENITIES, c.amenities, path + '.amenities')}</div>
       </div>
     </div>
 
