@@ -861,6 +861,24 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   .subject-card > .card-body > .field-row { display: contents; }
   .subject-card .field { margin-bottom: 0; grid-column: span 2; }
 
+  /* The Template picker is a full-width row of its own ABOVE the fields.
+
+     It is a direct child of this grid, so without an explicit placement it was
+     an unplaced item occupying ONE of the twelve columns — which pushed every
+     field along by one and broke the "spans sum to 12 per row" balance the
+     comment above depends on. Measured: fourteen fields landed on EIGHT visual
+     rows instead of three, with Property Name and Street Address staggered 5px
+     apart so the picker sat on top of the name input. Same treatment the
+     `more:` card already gives its own full-width sub-label, two rules down. */
+  .subject-card > .card-body > .fam-row {
+    grid-column: 1 / -1;
+    align-self: center;
+    justify-content: flex-start;
+    gap: 10px;
+    padding: 0;
+    margin-bottom: 2px;
+  }
+
   /* row 1 — identity + market */
   .subject-card .field[data-fld="name"],
   .subject-card .field[data-fld="address"],
