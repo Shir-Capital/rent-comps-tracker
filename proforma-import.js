@@ -93,10 +93,23 @@ function pfCmp(a, b) {
 async function pfFindCandidates(dealFolderId) {
   const subs = await listSubfolders(dealFolderId);
   const uw = subs.find(f => PF_UW_FOLDER_RE.test(f.name));
-  if (!uw) throw new Error('This deal folder has no "2. UW-Analysis" subfolder');
 
-  const folders = [{ id: uw.id, sub: '' }];
-  for (const s of await listSubfolders(uw.id)) folders.push({ id: s.id, sub: s.name });
+  /* `2. UW-Analysis` and its subfolders is where a pipeline deal keeps its
+     proformas, and it stays the primary place to look. But it is not the only
+     one, and throwing when it is absent made whole classes of workbook
+     unreachable: the Hedge Plus ModPack proformas live under
+     `9. Loan/M. Hedge Loan Mod 2026/1. Proformas/`, so pointing the app at that
+     folder failed with "no 2. UW-Analysis subfolder" even though the file was
+     one level down. Fall back to the linked folder itself plus its immediate
+     subfolders — one extra level, not a recursive crawl of the deal. */
+  const folders = [];
+  if (uw) {
+    folders.push({ id: uw.id, sub: '' });
+    for (const s of await listSubfolders(uw.id)) folders.push({ id: s.id, sub: s.name });
+  } else {
+    folders.push({ id: dealFolderId, sub: '' });
+    for (const s of subs) folders.push({ id: s.id, sub: s.name });
+  }
 
   const out = [];
   for (const f of folders) {
@@ -106,18 +119,52 @@ async function pfFindCandidates(dealFolderId) {
       if (PF_EXCLUDE.some(t => low.includes(t))) continue;
       out.push({
         id: file.id, name: file.name, sub: f.sub,
+        /* The folder the file sits in. `3. Comps` is a sibling of the proforma
+           on the ModPack layout and a child of the deal root on the standard
+           one, so the photo lookup needs to know where this file came from. */
+        folderId: f.id,
         modifiedTime: file.modifiedTime, size: Number(file.size || 0),
         tier: pfClassify(file.name), version: pfVersion(file.name),
       });
     }
   }
   out.sort(pfCmp);
+  if (!out.length && !uw) {
+    throw new Error('No proforma-looking workbook in this folder or its subfolders '
+      + '(and it has no "2. UW-Analysis")');
+  }
   return out;
 }
 
 // ------------------------------------------------------- workbook plumbing
 
 function pfC(ws, r, c) { return ws[XLSX.utils.encode_cell({ r: r - 1, c: c - 1 })]; }
+
+/* Read a cell as DISPLAY text, honouring an Excel date serial.
+
+   The workbook is read without `cellDates`, so a date comes back as the raw
+   serial (46188) and not a Date. That is fine for the numeric bands, which want
+   the number — but a free-typed TEXT attribute showing `46188` where the sheet
+   shows `2026-06-15` is just wrong. `cellNF: true` is already set on the read
+   (the row-4 band is classified by format), so each cell carries its own format
+   in `.z` and we can tell a date from a plain number instead of guessing by
+   magnitude. Falls back to the plain value when the format is not a date one. */
+function pfDisplay(ws, r, c) {
+  const cell = pfC(ws, r, c);
+  if (!cell || cell.v == null) return undefined;
+  const z = String(cell.z || '');
+  const looksDate = /[dmyh]/i.test(z) && !/[#?]/.test(z);
+  if (typeof cell.v === 'number' && looksDate) {
+    try {
+      const d = XLSX.SSF && XLSX.SSF.parse_date_code ? XLSX.SSF.parse_date_code(cell.v) : null;
+      if (d && d.y) {
+        const p = n => String(n).padStart(2, '0');
+        return d.y + '-' + p(d.m) + '-' + p(d.d);
+      }
+    } catch (e) { /* fall through to the raw value */ }
+  }
+  return cell.v;
+}
 function pfV(ws, r, c) { const x = pfC(ws, r, c); return x ? x.v : undefined; }
 function pfF(ws, r, c) { const x = pfC(ws, r, c); return (x && x.z) || ''; }
 function pfN(v) { return typeof v === 'number' && isFinite(v) ? v : null; }
@@ -133,8 +180,22 @@ const PF_FMT_VAC = /Vac/i;
 const PF_FMT_CONC_AMT = /Conc.*\$/i;
 const PF_FMT_CONC_PCT = /Conc(?!.*\$)/i;
 const pfWdLike = v => typeof v === 'string' && v.toLowerCase().includes('w/d');
-const pfUtilLike = v => typeof v === 'string' && !pfWdLike(v)
-  && /^[WGE+]+\s*-\s*[A-Za-z]+$/.test(v.trim());
+/* A row-4 Utilities cell.
+
+   The shape test alone (`E+W-R`, `W+G-R`) missed TWO of the template's own five
+   dropdown options, because neither carries a dash: `ABP` and `Fixed`. On
+   ModPack v20 that silently lost Waterford Studios' `ABP` — the cell is a
+   formula and its cached value was right there. So: match the schema's own list
+   first, then fall back to the dashed shape, which is what catches the variants
+   the ALN filler writes beyond the dropdown (`E+W-R`, `E-R`). */
+const pfUtilLike = (v) => {
+  if (typeof v !== 'string' || pfWdLike(v)) return false;
+  const s = v.trim();
+  if (!s) return false;
+  const known = (typeof SCHEMA === 'object' && SCHEMA && SCHEMA.utilStructures) || [];
+  if (known.some(o => o.toLowerCase() === s.toLowerCase())) return true;
+  return /^[WGE+]+\s*-\s*[A-Za-z]+\s*\??$/.test(s);
+};
 
 /**
  * `{field: column}` for one row-4 header band, classified by number format and
@@ -535,8 +596,29 @@ function pfReadComps(ws) {
   });
 
   // ---- label blocks (subject side)
+  /* Find the attribute band's header row.
+
+     🔴 The window used to be `totRow + 8`, and that number came from the v9
+     layout where 'Tot./Avg.' sat at 76 and 'Physical Attributes' two or three
+     rows under it. Template v41 moved the totals to 176 and the header to 200 —
+     a gap of 24 — and ExStay v38 opens a gap of 38. BOTH current generations
+     fell outside the window, so `attrHdr` came back 0, `blocks` came back empty,
+     and the schema-driven reader below never ran at all: importing the Hedge
+     Plus ModPack v20 produced ten correctly-named comps carrying ZERO of the 79
+     attributes, zero amenities and zero fees, with no error. The 2026-09-16 pass
+     fixed how the band is read and left how it is FOUND untouched, so the fix
+     was dead code on every workbook built this decade.
+
+     Now: start from the gap this family's schema declares, then widen. The label
+     is unique on the sheet, so a generous search risks no false positive — the
+     populator's own resolver scans 150 rows for the same string. */
   let attrHdr = 0;
-  for (let r = totRow; r <= totRow + 8 && !attrHdr; r++) {
+  const wantGap = (TAB.rowAttrHeader || 0) - (TAB.rowTotals || 0);
+  const expected = totRow + wantGap;
+  if (wantGap > 0 && /physical attribute/i.test(pfS(pfV(ws, expected, S)))) {
+    attrHdr = expected;                       // fast path: the schema was right
+  }
+  for (let r = totRow; r <= totRow + 150 && !attrHdr; r++) {
     if (/physical attribute/i.test(pfS(pfV(ws, r, S)))) attrHdr = r;
   }
   /* The attribute band is read SCHEMA-FIRST and label-VERIFIED (2026-09-16).
@@ -557,6 +639,10 @@ function pfReadComps(ws) {
      A field whose label does not match is skipped and reported, never guessed —
      the same rule the fee reader below has followed since 2026-08-08. */
   const bandDelta = attrHdr ? attrHdr - (TAB.rowAttrHeader || attrHdr) : 0;
+  /* Per-comp column offsets, off the schema rather than re-typed: the fee LABEL
+     lives at offset 6 of each comp block and its value at offset 7. */
+  const OFF_FEE_LABEL = (TAB.offsets && TAB.offsets.feeLabel != null) ? TAB.offsets.feeLabel : 6;
+  const OFF_FEE_VALUE = (TAB.offsets && TAB.offsets.feeValue != null) ? TAB.offsets.feeValue : 7;
   const schemaBlock = (items, labelCol) => {
     const out = [];
     items.forEach(it => {
@@ -626,9 +712,18 @@ function pfReadComps(ws) {
     // nine-column block. On any other stride they stay unread — a guessed
     // offset writes a neighbouring comp's answers onto this one.
     if (attrHdr && stride === 9) {
-      c.attrs = blocks.attrs.map(([r, l, k]) => [l, pfV(ws, r, b + 2), k]);
-      c.amens = blocks.amens.map(([r, l, k]) => [l, pfV(ws, r, b + 5), k]);
-      c.fees = blocks.fees.map(([r, l]) => [l, pfV(ws, r, b + 7)]);
+      c.attrs = blocks.attrs.map(([r, l, k]) => [l, pfDisplay(ws, r, b + 2), k]);
+      c.amens = blocks.amens.map(([r, l, k]) => [l, pfDisplay(ws, r, b + 5), k]);
+      /* 🔴 Each comp's fee labels come from ITS OWN label column (offset 6), not
+         from the subject's. This used to pair the subject's label at row r with
+         the comp's value at row r — and the labels genuinely differ per comp,
+         which the fee reader's own comment has warned about since 2026-08-08.
+         On ModPack v20 the subject carries Trash / Pest / Utility Bill Fee while
+         Orbit carries amenity / facility / trash / v. trash / pest, so Orbit's
+         $10 amenity imported as `trash`, its $15 facility as `pest`, and its
+         $49.95 valet trash vanished. Silent, and wrong in the direction that
+         feeds Eff. $/Mo. */
+      c.fees = blocks.fees.map(([r]) => [pfS(pfV(ws, r, b + OFF_FEE_LABEL)), pfV(ws, r, b + OFF_FEE_VALUE)]);
     } else {
       c.attrs = []; c.amens = []; c.fees = [];
     }
@@ -687,12 +782,24 @@ function pfTri(v) {
   return ['', ''];
 }
 
-function pfOption(value, options) {
+/* Map a cell to one of a field's dropdown options.
+
+   An off-list value used to return '' — a silent drop. Real workbooks carry
+   them: ModPack v20's row-4 Utilities cells hold `E+W-R` and `E-R` on 5 of its
+   10 comps, written by the ALN attribute filler, while the template's own
+   validation list (identical in v57 and in v20 itself) allows only
+   `ABP, W+G-R, W-R, E+W+G-R, Fixed`. Blanking them loses what the analyst can
+   plainly see on the tab; so the raw value is KEPT and pushed onto `offList`
+   for the import summary to report. The workbook disagreeing with its own
+   dropdown is a real condition worth naming, not one to paper over. */
+function pfOption(value, options, offList, where) {
   const v = pfS(value);
   if (!v) return '';
   const hit = (options || []).find(o => o.toLowerCase() === v.toLowerCase())
     || (options || []).find(o => o.toLowerCase().replace(/\s/g, '') === v.toLowerCase().replace(/\s/g, ''));
-  return hit || '';
+  if (hit) return hit;
+  if (offList) offList.push({ where: where || '', value: v });
+  return v;
 }
 
 /** The bucket RECORD for a beds/baths pair. `bucketFor()` returns the key
@@ -704,8 +811,64 @@ function pfBucket(beds, baths) {
 }
 
 /** The whole mapping from a COMPS read to the field items this app holds. */
+/* Match a free-typed FEES label to a tracker fee field.
+
+   The band's labels are analyst-editable dropdown cells and they are typed by
+   hand, so exact-match on `compsLabel` alone resolved only 4 of the 13 distinct
+   labels on a real 10-comp ModPack tab. Three widenings, in order, none of them
+   a guess:
+     1. normalise - lowercase, strip periods ("V. Trash" -> "v trash"), collapse
+        whitespace and trim ("pest " and "amenity " both ship with a trailing
+        space on that tab).
+     2. match `compsLabel` first - the 5 labels that actually reach a COMPS cell.
+     3. then match the fee's own `label`/`key` - which rescues the tracker-only
+        fields that exist but carry no compsLabel. "Pest" appears on 7 of the 10
+        comps and IS a tracker fee key; it was landing in `other` purely because
+        it has no COMPS row.
+   Deliberately NOT done: synonym guessing. "Facility", "Community Fee",
+   "Utility Bill Fee" and "Trash Service" are real, distinct charges; folding
+   them into `amenity` or `trash` would invent data. They stay unmatched, are
+   kept in full, and are surfaced for a human. */
+
+/* A text attribute's cell is not always a string.
+
+   pfS() returns '' for anything that is not a string, which is right nearly
+   everywhere — but these band cells are free-typed and real workbooks put other
+   types in them. On Hedge Plus ModPack v20, `Lease Terms` holds a DATE on 7
+   comps (SheetJS hands back a Date for `2026-06-15`) and the bare NUMBER 12 on
+   Aubry Hills, so all 8 imported blank over a populated cell. Dates render as
+   YYYY-MM-DD rather than the locale string, because that is what an analyst
+   typing a lease expiry into a text cell meant. */
+function pfText(v) {
+  if (v == null) return '';
+  if (typeof v === 'string') return v.trim();
+  if (v instanceof Date && !isNaN(v)) {
+    const p = n => String(n).padStart(2, '0');
+    return v.getUTCFullYear() + '-' + p(v.getUTCMonth() + 1) + '-' + p(v.getUTCDate());
+  }
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  if (typeof v === 'boolean') return v ? 'Y' : 'N';
+  return '';
+}
+
+function pfFeeNorm(s) {
+  return String(s == null ? '' : s).toLowerCase().replace(/\./g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function pfMatchFee(label) {
+  const n = pfFeeNorm(label);
+  if (!n) return null;
+  const all = SCHEMA.fees || [];
+  return all.find(x => x.compsLabel && pfFeeNorm(x.compsLabel) === n)
+      || all.find(x => pfFeeNorm(x.label) === n || pfFeeNorm(x.key) === n)
+      || null;
+}
+
 function pfToImport(det) {
   const warn = [];
+  /* Dropdown values the workbook carries that its own validation list does not
+     allow. Collected by pfOption() and reported, never silently dropped. */
+  const offList = [];
   const FEE_ROWS = (SCHEMA.fees || []).filter(f => f.compsLabel);
 
   const dash = det.dash || {};
@@ -831,8 +994,8 @@ function pfToImport(det) {
     comp.distance_miles = pfNumStr(c.distance_mi, 2);
     comp.vacancy_pct = pfPct(c.vacancy);
     comp.concession_amount = pfNumStr(c.conc_amt, 0);
-    comp.wd_type = pfOption(c.wd, SCHEMA.wdTypes);
-    comp.util_structure = pfOption(c.util, SCHEMA.utilStructures);
+    comp.wd_type = pfOption(c.wd, SCHEMA.wdTypes, offList, comp.name + ' W/D');
+    comp.util_structure = pfOption(c.util, SCHEMA.utilStructures, offList, comp.name + ' Utilities');
     comp.source = pfOption(c.source, SCHEMA.sources);
 
     const ct = pfS(c.comp_type).toLowerCase();
@@ -867,7 +1030,7 @@ function pfToImport(det) {
           : (s === 'Y' ? '1' : (s === 'N' ? '0' : ''));
         if (n === null && s && s !== 'Y' && s !== 'N') notes.push(lbl + ': ' + s);
       } else {
-        bag[key] = s;   // text, and alloc's two dropdown strings
+        bag[key] = s || pfText(val);   // text, and alloc's two dropdown strings
       }
     };
     (c.attrs || []).forEach(([lbl, val, key]) => readAttr(comp.physical, physByKey, lbl, val, key));
@@ -888,15 +1051,25 @@ function pfToImport(det) {
         notes.push('Fee with no label: ' + pfS(val) + ' — it is still summed into Eff. $/Mo');
         return;
       }
-      const f = FEE_ROWS.find(x => (x.compsLabel || '').toLowerCase() === label.toLowerCase());
+      const f = pfMatchFee(label);
       if (f && pfN(val) !== null) comp.fees[f.key] = pfNumStr(val);
       else if (f) notes.push('Fee ' + label + ': ' + pfS(val));
       else {
-        // A real charge the tracker has no field for — keep it rather than drop it.
+        /* A real charge the tracker has no field for. Every one is kept now, not
+           just the first: `other` is a single slot, and a real ModPack comp
+           carries up to five free-typed labels (Alma: Trash, Pest, Utility Bill
+           Fee, Res. Utility, Community Fee), so the old `!comp.fees.other` guard
+           silently dropped four of them. The first still fills other/other_label
+           for compatibility; the full list rides along so nothing is lost and the
+           import summary can show what needs a home. */
         notes.push('Fee ' + label + ': ' + pfS(val) + ' (no tracker field for this label)');
-        if (pfN(val) !== null && !comp.fees.other) {
-          comp.fees.other = pfNumStr(val);
-          comp.fees.other_label = label;
+        if (pfN(val) !== null) {
+          comp.fees.unmatched = comp.fees.unmatched || [];
+          comp.fees.unmatched.push({ label, amount: pfNumStr(val) });
+          if (!comp.fees.other) {
+            comp.fees.other = pfNumStr(val);
+            comp.fees.other_label = label;
+          }
         }
       }
     });
@@ -947,6 +1120,19 @@ function pfToImport(det) {
   if (det.comps.length > MAX_COMPS) {
     warn.push('The proforma carries ' + det.comps.length + ' comps; only the first '
       + MAX_COMPS + ' fit the COMPS tab and were read');
+  }
+  if (offList.length) {
+    /* Named per comp rather than counted: the analyst needs to know WHICH cell
+       disagrees with the template's own dropdown before deciding what it meant. */
+    const shown = offList.slice(0, 6).map(o => o.where + ' = "' + o.value + '"').join('; ');
+    warn.push(offList.length + ' dropdown value(s) sit outside the list the template itself allows, and were '
+      + 'imported as-is rather than dropped: ' + shown
+      + (offList.length > 6 ? '; and ' + (offList.length - 6) + ' more' : ''));
+  }
+  const unmatchedFees = comps.reduce((n, c) => n + (((c.fees || {}).unmatched || []).length), 0);
+  if (unmatchedFees) {
+    warn.push(unmatchedFees + ' fee row(s) carry a label the tracker has no field for '
+      + '(e.g. Facility, Utility Bill Fee). Every one was kept on the comp; none were dropped.');
   }
   if (det.stride !== 9) {
     warn.push('This workbook\'s comp blocks stride ' + det.stride
@@ -1252,6 +1438,20 @@ function pfApply() {
      the analyst editing the field. It rides serializeProperty() to Drive, so a
      teammate opening this on another device sees the same source. */
   const f = pfPickedFile();
+  /* Point the photo reader at the `3. Comps` that belongs to THIS workbook.
+
+     photos.js resolves `3. Comps` under the linked deal folder, which is right
+     for a pipeline deal. The ModPack layout puts it beside the proforma instead
+     (`9. Loan/M. Hedge Loan Mod 2026/1. Proformas/3. Comps/<Comp>/`), so without
+     this the 36 ALN photos sitting next to the imported workbook were invisible.
+     Only set when a sibling folder actually exists; otherwise leave the cached
+     value alone and let photos.js resolve the deal root as before. Fire-and-
+     forget: a failed lookup must not block an import that already succeeded. */
+  if (doComps && f && f.folderId) {
+    driveFindSubfolder(f.folderId, COMPS_FOLDER)
+      .then(id => { if (id) STATE.drive.compsFolderId = id; })
+      .catch(() => {});
+  }
   const rec = () => ({
     fileId: f ? f.id : '', fileName: f ? f.name : '',
     driveModifiedTime: f ? f.modifiedTime : '',

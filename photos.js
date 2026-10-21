@@ -193,9 +193,43 @@ async function phCompFolder(comp, create) {
     if (compsId) STATE.drive.compsFolderId = compsId;
   }
   if (!compsId) return '';
-  return create
-    ? await driveEnsureSubfolder(compsId, name)
-    : await driveFindSubfolder(compsId, name);
+  if (create) return await driveEnsureSubfolder(compsId, name);
+  /* READ: exact first, then a careful fallback. driveFindSubfolder matches the
+     name EXACTLY, and a comp imported from a proforma rarely carries the same
+     string as its Drive folder — the COMPS tab says `Alma`, the folder is
+     `Alma Apartments`. Without this, every imported comp showed "no photos yet"
+     beside a folder full of them. Creation still uses the exact comp name, so
+     this only ever RESOLVES an existing folder, never makes a near-miss one. */
+  return (await driveFindSubfolder(compsId, name))
+      || await phMatchCompFolder(compsId, name);
+}
+
+/** Normalised for comparison: letters and digits only. "Alma Apartments" and
+    "alma-apartments" both become "almaapartments". */
+function phFolderNorm(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Find this comp's folder when the names are not identical.
+ *
+ * Deliberately conservative, because picking the wrong folder shows another
+ * property's photos under this comp — worse than showing none. A candidate
+ * qualifies only on a normalised exact match, or when one name is a prefix of
+ * the other (`Alma` / `Alma Apartments`). An AMBIGUOUS result — two folders
+ * that both qualify — returns nothing rather than guessing.
+ */
+async function phMatchCompFolder(compsId, name) {
+  const want = phFolderNorm(name);
+  if (want.length < 3) return '';          // too short to match safely
+  let subs = [];
+  try { subs = await listSubfolders(compsId); } catch (e) { return ''; }
+  const scored = subs.filter(f => {
+    const got = phFolderNorm(f.name);
+    return got && (got === want || got.startsWith(want) || want.startsWith(got));
+  });
+  if (scored.length !== 1) return '';
+  return scored[0].id;
 }
 
 // ------------------------------------------------------------------ the read

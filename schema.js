@@ -18,10 +18,12 @@ window.SCHEMA = {
       61,
       70,
       79,
-      88
+      88,
+      97,
+      106
     ],
     "compBlockWidth": 9,
-    "maxComps": 8,
+    "maxComps": 10,
     "templateSlots": 10,
     "templateSlotBaseCols": [
       25,
@@ -35,7 +37,7 @@ window.SCHEMA = {
       97,
       106
     ],
-    "reservedSlotNote": "The COMPS tab has ten comp slots (through DB), but slots 9-10 (CS, DB) are deliberately never populated: populate_comps v34+ read their pristine offset-0 columns as the reference for restoring unit line-# serials a pre-v34 run clobbered. Filling them destroys that reference, so maxComps stays 8. Unaffected by the v41 band rebuild.",
+    "reservedSlotNote": "RETIRED 2026-10-21 - maxComps went 8 -> 10. The COMPS tab has ten slots (through DB) and the app now fills all ten. The old reservation said slots 9-10 (CS, DB) must stay pristine because populate_comps v34+ read them as the reference for restoring unit line-# serials a pre-v34 run clobbered. That reference is NARROWER than the old note implied and the app never touched it: v50's docstring pins it to slot 9 OFFSET 0 on the UNIT ROWS (column CS, rows 6-175), and Step B writes offsets 1-8 only. The paste-export writes offset 0 just once, at row 3 (the comp number), and its unit band writes offsets 1-4 - unitRowNum is in build_schema.py's formula_offsets ban list, so it can never be added by accident. populate_comps v49+ itself writes comps 1..10 and unhides CS:DJ, so the 8-comp ceiling was the last thing still honouring a retired rule. Real deals need it: the Hedge Plus ModPack v20 COMPS tab carries TEN populated comps, and at maxComps 8 the importer silently dropped Starburst and Ivy. pasteMap needed no change - $Y$3:$DJ$270 already spans DJ (col 114) = slot 10 base 106 + offset 8.",
     "rowHeader": 3,
     "rowDetails": 4,
     "rowColHeaders": 5,
@@ -445,6 +447,7 @@ window.SCHEMA = {
     }
   ],
   "_amenitiesNote": "All 59 Amenity fields the v41+ band carries, in 11 sub-groups (Building & Common 2, Activity / Lifestyle 13, Parking 6, Floorplan 9, Kitchen / Bath 5, Services 6, Utilities 3, Property Allocated Expenses 5, Internet / Broadband 2, Security 5, Pets 3) — expanded 2026-09-16 from the 9-key v9 vocabulary, which was NOT a subset of this one. Rows are NOT contiguous: they interleave with the 11 sub-group header rows, so build_schema.py validates by band-membership and uniqueness, never by anchor + index. The 9 pre-existing keys keep their exact key/label/row/hellodata, including the two that read oddly against the new vocabulary and are kept anyway because renaming them would orphan live records and break the populator: `pool` is the key for '# of Pools' and `sport_court` for 'Basketball Court'. Both still carry `lossy: true` and their note.",
+  "_packageDeliveryNote": "Typed `text`, not `tri`, since 2026-10-21. It looks like a Y/N and was one until a real workbook proved otherwise: ALN writes the SERVICE MODEL into this cell - `Sign/Hold Only`, `Service/System`, `Do Not Accept` - and the ALN skill already lists it in its own TEXT_AMENITY_LABELS. As `tri` the importer ran it through pfTri(), which returns blank for anything that is not Y/N, so 7 of the 10 comps on Hedge Plus ModPack v20 imported this field EMPTY over a populated cell. Raised as an open question 2026-10-14; settled here by the workbook.",
   "_bandTypesNote": "Field input types. The template carries almost NO type metadata — every value cell in both bands is General format with no data validation — so only ONE of these is measured and the rest are decisions, recorded here so they can be argued with rather than silently re-guessed. MEASURED: `alloc` (5 fields, the Property Allocated Expenses sub-group) is the one case the workbook itself types, via a real 'To Property,To City/Utility' dropdown read off ws.data_validations; its `options` come from that list. DECIDED: `count` = any label starting with '#' (# Common Laundry Rms, # of Pools, # of Tennis Courts) — a count column cannot hold a Y/N string, which is the bug v44 introduced for pools; `number` = Stories, Residential Buildings, Renovated - Year; `text` = Property Type, Renovated - Scope, Roof Type, Lease Terms, Locator Commission, Views, Specials, Other Notes, Pets Policy; `tri` = everything else, the Y/N/blank tri-state all 18 pre-existing fields already used. Note `roof_type` stays `text` here but populate_comps-v45.py still writes it 'Y'/'N' through the legacy PHYSICAL_ATTR_LABELS route — the paste-export route honours the type, the populator route does not, and only the populator can fix that.",
   "amenities": [
     {
@@ -760,7 +763,7 @@ window.SCHEMA = {
       "label": "Package Delivery",
       "group": "Services",
       "row": 245,
-      "type": "tri",
+      "type": "text",
       "hellodata": null
     },
     {
@@ -1326,10 +1329,12 @@ window.SCHEMA = {
         61,
         70,
         79,
-        88
+        88,
+        97,
+        106
       ],
       "compBlockWidth": 9,
-      "maxComps": 8,
+      "maxComps": 10,
       "templateSlots": 10,
       "templateSlotBaseCols": [
         25,
@@ -1970,7 +1975,7 @@ window.SCHEMA = {
         "label": "Package Delivery",
         "group": "Services",
         "row": 159,
-        "type": "tri",
+        "type": "text",
         "hellodata": null
       },
       {
