@@ -1036,7 +1036,7 @@ function subjectBandHtml(s) {
             Leave blank when unknown; never guess.</div>
           ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsLabel), s.fees || {}, 'subject.fees')}
           <div class="sub-label" title="Fees the tracker knows but the COMPS FEES dropdown has no row for (Pest, one-time and optional charges). Kept on the record and in the export JSON; not written to the COMPS tab.">Tracker-only (no COMPS row)</div>
-          ${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsLabel), s.fees || {}, 'subject.fees')}
+          <div class="subject-extra-fees">${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsLabel), s.fees || {}, 'subject.fees')}</div>
         </div>
       </div>
       </div>

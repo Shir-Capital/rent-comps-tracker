@@ -1036,8 +1036,19 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
      the Amenities card is ~550px and three pairs leave ~125px a label. Two pairs
      across there. Scoped to `.subject-attrs` inside `.narrow`, so the comp
      editor's tuned balance is untouched. */
-  #phase-content.narrow .subject-attrs > .card .tri-grid {
+  #phase-content.narrow .subject-attrs > .card .tri-grid,
+  #phase-content.narrow .subject-attrs > .attr-col .tri-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr) 58px);
+  }
+  /* The 11 tracker-only fees render as stacked label-over-input fields, ~54px
+     each — about 600px of the left column on their own. Two across. Measured at
+     1400 (container capped at 900, so this holds for every width the 900px
+     block covers) on the Hedge v20 subject: left column 1707px -> 1099px against
+     Amenities' 1198px, 0 of 79 labels clipped, no horizontal overflow. Tried and
+     rejected: physical one pair across + fees two across = 1395 vs 1198; three
+     across for the fees = 965 vs 1198 and cramped. */
+  #phase-content.narrow .subject-attrs .subject-extra-fees {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2px 10px;
   }
 
   /* ------------------------------------------------------------- buttons */
