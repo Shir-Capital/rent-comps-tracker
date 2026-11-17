@@ -8,7 +8,8 @@ window.SCHEMA = {
     "_versionNote": "Historical, pre-v44: bumped v7 -> v8 on 2026-08-08. The COMPS GEOMETRY was identical in v7 and v8 — every row, column, offset and section was unchanged, and the schema verified 67/67 against both. What changed in v8 was only what the FEES label cells CONTAIN (they became dropdowns, and five of the eight v7 labels were dropped), which is why fees are routed by `compsLabel` and never by row. `populatorScript` moved to v36 in the same pass, then v37 on 2026-08-10 (per-plan subject market rents). Superseded by the v44 band rebuild above — kept for the fee-routing-by-label history, not as current geometry.",
     "_v9Note": "Historical: bumped v8 -> v9 on 2026-08-10, a pure stamp — SHIR_MF_Template_v9's entire delta was 274 cells inside COMPS!R3:W76 (a lease-recency window on the INTERNAL comps block), byte-identical COMPS geometry otherwise. Superseded by v44 above.",
     "_v57Note": "Stamp-only bump 2026-10-14: v45 -> SHIR_MF_Template_v57, ExStay v38 -> v56, populator v45 -> v50. NO row numbers changed and none needed to - the COMPS attribute band has not moved since v45. Proven the way the v45 bump was, against the live workbooks rather than the changelogs: MF 128/128 against SHIR_MF_Template_v57.xlsx and ExStay 130/130 against SHIR_ExStay_Template_v56.xlsx, all 79 labels checked at their own rows, BEFORE any stamp was touched. Twelve MF generations (v46-v57) and eighteen ExStay ones changed other tabs only. Why bother when nothing moved: these two strings are what export.js prints on tab 4 and what the paste mirror's READ ME claims it was built against, so a stale one tells an analyst the export targets a template it does not. The populator stamp is the command tab 4 hands them - v50 writes all 10 comp slots and keeps floorplan lines visible through the row collapse, where v45 wrote 8. Note verify_against_template.py with no path resolves the template NAMED here, and superseded templates get archived, so a stale stamp eventually fails to resolve at all - which is how this one surfaced. Re-stamping is cheap: re-run the verifier for both families and only move a ROW if it fails.",
-    "templateVersion": "SHIR_MF_Template_v57",
+    "_v65Note": "Stamp-only bump 2026-11-17: MF v57 -> SHIR_MF_Template_v65, ExStay v56 -> SHIR_ExStay_Template_v65; populator stays v50 (still the newest in SKILLS). NO row numbers changed. Proven before any stamp moved: verify_against_template.py 128/128 MF and 130/130 ExStay against both v64 and v65; a cell-by-cell COMPS diff (values, formulas incl. array-formula text, number formats, data validations, merges, hidden rows) found MF v57->v64->v65 IDENTICAL and ExStay v56->v65 identical except G6:G11=999 and G16:G18=1199 typed into subject column G from ExStay v60 on. Those are deliberate seeded market rents (SHIR/Claude insert them), not stray test data, and they import as editable per-plan market rents. A reverse scan of all 10 comp columns found no label in the band that is not a schema field or one of its 4+11 sub-group headings, and every template dropdown list equals the schema option list. Tool: Accessories/comps_tab_diff.py.",
+    "templateVersion": "SHIR_MF_Template_v65",
     "populatorScript": "rent-comp-data-populator-populate_comps-v50.py",
     "compBaseCols": [
       25,
@@ -106,7 +107,7 @@ window.SCHEMA = {
         "range": "$Y$3:$DJ$270",
         "anchor": "Y3",
         "default": true,
-        "label": "All 8 comps — names, row 4, unit rows, type/source, attributes, fees"
+        "label": "All 10 comps — names, row 4, unit rows, type/source, attributes, fees"
       },
       {
         "key": "subject",
@@ -1319,7 +1320,7 @@ window.SCHEMA = {
   "exstay": {
     "compsTab": {
       "_note": "Row map verified live against SHIR_ExStay_Template_v38.xlsx on 2026-09-15 (row_totals=76, row_comp_type=77, row_phys_header=114, layout='new' — same dispatcher tag as MF v41+ since row 115 col Y reads 'Building', not 'HVAC Indiv.'). Column layout (compBaseCols, compBlockWidth, all `offsets`) is IDENTICAL to MF — only rows moved. The concession roll-up stayed at its legacy R:W columns (rollupCols below) instead of moving to MF's J:O — confirmed live and called out explicitly in populate_comps-v45.py's module docstring (the v44.1 fix) and the v38 changelog §1's reference table.",
-      "templateVersion": "SHIR_ExStay_Template_v56",
+      "templateVersion": "SHIR_ExStay_Template_v65",
       "populatorScript": "rent-comp-data-populator-populate_comps-v50.py",
       "compBaseCols": [
         25,
@@ -2172,7 +2173,7 @@ window.SCHEMA = {
           "range": "$Y$3:$DJ$184",
           "anchor": "Y3",
           "default": true,
-          "label": "All 8 comps — names, row 4, unit rows, type/source, attributes, fees"
+          "label": "All 10 comps — names, row 4, unit rows, type/source, attributes, fees"
         },
         {
           "key": "subject",

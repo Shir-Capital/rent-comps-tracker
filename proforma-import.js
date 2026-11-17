@@ -984,6 +984,42 @@ function pfToImport(det) {
     }
   }
 
+  /* Per-plan market rents from COMPS column G (2026-11-17). Column G is seeded
+     on purpose — by SHIR or by Claude (ExStay v60+ ships 999 / 1199 there) — and
+     analysts type their own per-plan figures into it, so it is real data to carry
+     into the record, not noise to skip. It lands as the Screener's own per-row
+     model: `market_rent` with `market_rent_src = 'proforma'`, which the Screener
+     shows as the proforma figure and flips to 'user' the moment someone edits it.
+     Until this, only the section subtotals travelled (as marketRents overrides),
+     so six distinct 1x1 rents came back as one section average.
+
+     Matched BY PLAN LABEL with pxNorm's exact rule (lowercase, alphanumerics
+     only) so a rent read off row N is written back to row N by paste-export —
+     the round trip is a no-op. Every finish of a plan gets the same figure,
+     because COMPS holds one subject row per plan (the Screener's own rule). Full
+     precision: pfNumStr with no dp keeps up to two decimals, never rounds to $1. */
+  const pfPlanKey = v => String(v == null ? '' : v).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const gByPlan = {};
+  det.subject.types.forEach(t => {
+    const k = pfPlanKey(t.plan);
+    if (k && t.mkt_mo > 0 && !(k in gByPlan)) gByPlan[k] = t.mkt_mo;
+  });
+  let plansSeeded = 0;
+  const seededKeys = new Set();
+  subjectUnitMix.forEach(r => {
+    const k = pfPlanKey(r.plan);
+    if (!(k in gByPlan)) return;
+    r.market_rent = pfNumStr(gByPlan[k]);
+    r.market_rent_src = 'proforma';
+    seededKeys.add(k);
+  });
+  plansSeeded = seededKeys.size;
+  const gUnmatched = Object.keys(gByPlan).filter(k => !seededKeys.has(k));
+  if (gUnmatched.length) {
+    warn.push(gUnmatched.length + ' per-plan market rent(s) in COMPS column G had no matching plan in the '
+      + 'imported unit mix and were not carried over — the section figure still applies to them');
+  }
+
   const comps = det.comps.slice(0, MAX_COMPS).map(c => {
     const comp = newComp();
     const notes = [];
@@ -1152,7 +1188,7 @@ function pfToImport(det) {
   });
 
   return { subject, subjectUnitMix, comps, marketRents, warnings: warn, stride: det.stride,
-           mixSource, mixTotals };
+           mixSource, mixTotals, plansSeeded };
 }
 
 // ------------------------------------------------------------------ the UI
@@ -1414,6 +1450,7 @@ function pfApply() {
   if (doMix) {
     STATE.subjectUnitMix = p.subjectUnitMix.map(r => Object.assign({}, r, { id: uid() }));
     applied.push(p.subjectUnitMix.length + ' subject plans');
+    if (p.plansSeeded) applied.push(p.plansSeeded + ' per-plan market rent' + (p.plansSeeded === 1 ? '' : 's') + ' (editable in the Screener)');
   }
   if (doComps) {
     STATE.comps = p.comps.map(c => {

@@ -533,7 +533,7 @@ async function pxBuildWorkbook(mirror) {
       + 'Without that tick the paste will destroy the subtotal rows, the Eff. $/Mo columns and column B’s array formula. It is not optional.', true);
     line('IT CANNOT CLEAR', 'A paste can set and overwrite but never empty a cell. If a comp slot already holds data, do the CLEAR FIRST sheet first.', true);
     ws.addRow([]);
-    line('Built against', TAB.templateVersion || 'SHIR_MF_Template_v57');
+    line('Built against', TAB.templateVersion || 'SHIR_MF_Template_v65');
     line('Mode', mirror.aligned
       ? 'ALIGNED to ' + mirror.tgt.fileName + ' — fee rows and subject plan rows resolved against that workbook'
       : 'GENERIC — no workbook attached. Per-plan market rents are NOT written and fee labels use the template default rows.');

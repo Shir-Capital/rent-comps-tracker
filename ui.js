@@ -1108,7 +1108,7 @@ function renderPhase2() {
           <button class="btn small primary" id="btn-add-comp"${full ? ' disabled' : ''}>+ Add Comp</button>
           <button class="btn small" id="btn-hd-comparables">☁ Pull from HelloData</button>
         </div>
-        ${full ? '<div class="tiny muted" style="margin-top:5px">The COMPS tab holds 8 comps — delete one to add another.</div>' : ''}
+        ${full ? '<div class="tiny muted" style="margin-top:5px">The COMPS tab holds ' + MAX_COMPS + ' comps — delete one to add another.</div>' : ''}
       </div>
     </div>
     ${cards || '<div class="muted small" style="padding:8px 2px">No comps yet. Add one, or pull candidates from HelloData.</div>'}
