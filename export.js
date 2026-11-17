@@ -170,6 +170,14 @@ function collectChecks() {
     });
   }
 
+  if (!subjectBandHasData(STATE.subject)) {
+    out.push({
+      level: 'warn',
+      msg: 'No subject attributes, amenities or fees recorded — COMPS columns C / F / G:H stay blank, '
+        + 'and populate_comps picks the best comp on proximity and comp type alone.',
+    });
+  }
+
   if (!out.some(c => c.level === 'err')) out.unshift({ level: 'ok', msg: 'No blocking problems — ready to export.' });
   return out;
 }
@@ -290,6 +298,28 @@ function buildPopulatorPayload() {
       util_structure: s.util_structure || '',
       reno_level: s.reno_level || '',
       hellodata_id: s.hellodata_id || '',
+      /* The subject's half of the COMPS attribute band (2026-11-17), typed the
+         same way as each comp's (attrJson: tri true/false/null, typed fields as
+         their own type).
+
+         🔴 Nested under `comps_band`, NOT as top-level `physical` / `amenities`
+         like a comp. populate_comps-v50.py's subject_attributes() runs
+         parse_hellodata_amenities() over subject_property, and that parser reads
+         `.amenities` as a token list: a dict there would tokenize every amenity
+         KEY, so a subject with pool:false would score as having a pool, and
+         because the payload path wins over the COMPS block it would mask the real
+         answers. The populator reads the band off COMPS!C/F directly, which the
+         paste export fills; this block is for the record and for any future
+         reader that asks for it by name. */
+      comps_band: {
+        physical: PHYSICAL.reduce((a, it) => { a[it.key] = attrJson(it, subjectPhysicalValue(it, s)); return a; }, {}),
+        amenities: AMENITIES.reduce((a, it) => { a[it.key] = attrJson(it, (s.amenities || {})[it.key]); return a; }, {}),
+        /* Every fee, as a comp's travel: COMPS-bound and tracker-only alike. */
+        fees: (SCHEMA.fees || []).reduce((a, f) => {
+          a[f.key] = f.type === 'number' ? numOrNull((s.fees || {})[f.key]) : ((s.fees || {})[f.key] || '');
+          return a;
+        }, {}),
+      },
       unit_mix: (STATE.subjectUnitMix || []).filter(rowHasData).map(r => ({
         type: (function () { const k = bucketFor(r.beds, r.baths); return k ? bucketTypeLabel(k) : ''; })(),
         bucket: bucketFor(r.beds, r.baths),
@@ -561,14 +591,15 @@ async function buildCompsWorkbook() {
   // ------------------------------------------------------------ Attributes
   {
     const ws = wb.addWorksheet('Attributes');
-    const heads = ['Attribute', 'Kind', 'COMPS Row'].concat(comps.map((c, i) => `${i + 1}. ${c.name || '(unnamed)'}`));
+    /* Subject first (2026-11-17), so the sheet reads as the comparison it is. */
+    const heads = ['Attribute', 'Kind', 'COMPS Row', 'Subject'].concat(comps.map((c, i) => `${i + 1}. ${c.name || '(unnamed)'}`));
     titleRow(ws, `PHYSICAL ATTRIBUTES & AMENITIES — blank = not known`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
 
-    const emit = (items, kind, bag) => items.forEach(it => {
-      const row = ws.addRow([it.label, kind, it.row].concat(comps.map(c => bag(c)[it.key] || '')));
+    const emit = (items, kind, bag, subj) => items.forEach(it => {
+      const row = ws.addRow([it.label, kind, it.row, subj(it)].concat(comps.map(c => bag(c)[it.key] || '')));
       row.eachCell((cell, n) => {
         cell.font = font;
         if (n > 3) {
@@ -578,9 +609,9 @@ async function buildCompsWorkbook() {
         }
       });
     });
-    emit(PHYSICAL, 'Physical', c => c.physical);
+    emit(PHYSICAL, 'Physical', c => c.physical, it => attrOut(it, subjectPhysicalValue(it, s)));
     ws.addRow([]);
-    emit(AMENITIES, 'Amenity', c => c.amenities);
+    emit(AMENITIES, 'Amenity', c => c.amenities, it => attrOut(it, (s.amenities || {})[it.key]));
 
     ws.columns.forEach((col, i) => { col.width = i === 0 ? 20 : (i < 3 ? 11 : 16); });
     ws.views = [{ state: 'frozen', ySplit: 3, xSplit: 1 }];

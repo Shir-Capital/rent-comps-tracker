@@ -152,6 +152,11 @@ function categoryPickerHtml(current, path) {
 function resolveFieldTarget(path) {
   if (!STATE) return null;
   if (path === 'subject') return STATE.subject;
+  /* The subject's attribute band (2026-11-17): 'subject.physical' /
+     'subject.amenities' / 'subject.fees', the same bags a comp carries. Only
+     those three — any other dotted key is not a field target. */
+  const sm = String(path).match(/^subject\.(physical|amenities|fees)$/);
+  if (sm) return STATE.subject ? STATE.subject[sm[1]] : null;
   const m = String(path).match(/^comp:([^.]+)(?:\.(\w+))?$/);
   if (m) {
     const c = getComp(m[1]);
@@ -988,6 +993,63 @@ function gotoPhase(phase) {
 // Tab 1 — Subject
 // ============================================================================
 
+/* The subject's half of the COMPS attribute band (2026-11-17) — the same three
+   cards, the same widgets and the same field order as the comp editor, so the
+   Screener's left and right panels compare like with like. Bound to
+   STATE.subject.physical / .amenities / .fees via resolveFieldTarget(). The
+   COMPS-bound fees (those with a compsLabel) lead; the tracker-only ones follow
+   under their own label, because Import from Proforma fills them too (a real
+   subject carries Pest on its fee rows) and a value with no box is a value
+   nobody can see or correct.
+
+   `stories` shows the basics' Stories as its placeholder when the band value is
+   blank, because that is what the writers fall back to
+   (subjectPhysicalValue) — the box should not look empty over a number that
+   will in fact be written. */
+function subjectBandHtml(s) {
+  const phys = attrHtml(PHYSICAL, s.physical || {}, 'subject.physical');
+  const storiesHint = String((s.physical || {}).stories || '').trim() === '' && String(s.stories || '').trim() !== ''
+    ? s.stories : '';
+  const physOut = storiesHint
+    ? phys.replace(/(data-fpath="subject\.physical" data-fkey="stories"[^>]*placeholder=")—(")/, '$1' + esc(String(storiesHint)) + ' (from Stories above)$2')
+    : phys;
+  return `
+    <div class="card-trio attr-row subject-attrs">
+      <div class="attr-col">
+      <div class="card">
+        <div class="card-head" title="The subject's own Physical Attributes — COMPS column C beside the template's labels in column B. Leave “—” when you don't know.">
+          <span class="grow">Subject Physical Attributes</span>
+        </div>
+        <div class="card-body">
+          <div class="card-hint">The subject's side of the comparison — COMPS column C.
+            Leave “—” when you don't know; “N” claims the subject positively lacks it.</div>
+          ${physOut}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head" title="Fees the subject charges ALL tenants — COMPS columns G (label) and H ($/Mo). Leave blank when unknown — never guess.">
+          <span class="grow">Subject Fees</span><span class="head-stat">$/Mo</span>
+        </div>
+        <div class="card-body">
+          <div class="card-hint">Charged to ALL the subject's tenants — COMPS columns G / H.
+            Leave blank when unknown; never guess.</div>
+          ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsLabel), s.fees || {}, 'subject.fees')}
+          <div class="sub-label" title="Fees the tracker knows but the COMPS FEES dropdown has no row for (Pest, one-time and optional charges). Kept on the record and in the export JSON; not written to the COMPS tab.">Tracker-only (no COMPS row)</div>
+          ${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsLabel), s.fees || {}, 'subject.fees')}
+        </div>
+      </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head" title="The subject's own Amenities — COMPS column F beside the template's labels in column D.">
+          <span class="grow">Subject Amenities</span>
+        </div>
+        <div class="card-body">${attrHtml(AMENITIES, s.amenities || {}, 'subject.amenities')}</div>
+      </div>
+    </div>`;
+}
+
 function renderPhase1() {
   const host = $('#phase-content');
   const s = STATE.subject;
@@ -1017,6 +1079,8 @@ function renderPhase1() {
         <div data-umix-host="subject">${unitMixBlockHtml(STATE.subjectUnitMix, 'subject', 'subject')}</div>
       </div>
     </div>
+
+    ${subjectBandHtml(s)}
 
     <div class="card">
       <div class="card-head"><span class="grow">Drive</span></div>

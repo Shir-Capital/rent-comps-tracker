@@ -1031,6 +1031,14 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
   .card-trio .tri-grid > .lbl { font-size: 12px; }
   .card-trio .tri button { font-size: 11px; padding: 2px 0; }
   .card-trio .fee-cell input { min-height: 24px; padding: 1px 5px; }
+  /* The SUBJECT's attributes row (2026-11-17) sits in the 900px `narrow` tab,
+     not the 1320px comps tab the three-across rule above was tuned for — at 900
+     the Amenities card is ~550px and three pairs leave ~125px a label. Two pairs
+     across there. Scoped to `.subject-attrs` inside `.narrow`, so the comp
+     editor's tuned balance is untouched. */
+  #phase-content.narrow .subject-attrs > .card .tri-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr) 58px);
+  }
 
   /* ------------------------------------------------------------- buttons */
   .btn-row { padding-bottom: 0; }

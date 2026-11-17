@@ -64,6 +64,13 @@ window.SCHEMA = {
     "_feeOptionalOneTimeNote": "Optional Fees (208-212, same 12-item dropdown as Mandatory) and One-Time Fees (214-216, fixed pre-printed labels: Application Fee / Admin Fee / Pet Deposit, no dropdown) exist on the template but do NOT feed Eff. $/Mo and are out of scope for this pass — `fees` below still treats app_fee/admin_fee/pet_deposit as tracker-only, same as pre-v44. Recorded here only so a future pass does not have to re-resolve these rows from scratch.",
     "subjectMktRentCol": 7,
     "subjectUnitCountCol": 3,
+    "_subjectAttrColsNote": "Added 2026-11-17 for subject attribute capture. The SUBJECT block of the attribute band does NOT use the comp offsets: it is packed into B:H (7 columns) where a comp block spans 9. Physical label B / value C, Amenity label D / value F (E is spacer), FEES label G / $/Mo H. Absolute columns, like subjectMktRentCol. Read off SHIR_MF_Template_v65 and SHIR_ExStay_Template_v65 (identical in both, and identical to v57/v56): no formula anywhere in B:I of the band, no seeded constant in C/F/H, nothing on any other sheet references these cells, and the template's own alloc dropdown sits at F253:F257 (MF) / F167:F171 (ExStay) - i.e. on the amenity VALUE column. populate_comps-v50.py subject_attributes() reads the same cells (label+1, label+4) to score the best comp, so a captured subject now feeds that pick. Confirmed on a real file: Hedge Plus ModPack v20 carries 70+ subject values in exactly these columns.",
+    "subjectAttrCols": {
+      "physicalValue": 3,
+      "amenityValue": 6,
+      "feeLabel": 7,
+      "feeValue": 8
+    },
     "offsets": {
       "compNum": 0,
       "compName": 1,
@@ -167,9 +174,15 @@ window.SCHEMA = {
       ],
       "unitCols": [
         7
+      ],
+      "attr": [
+        "physicalValue",
+        "amenityValue",
+        "feeLabel",
+        "feeValue"
       ]
     },
-    "_neverWriteNote": "Asserted in build_schema.py against compsTab.offsets rather than restated as numbers: row 4 offsets totalUnits (=Z176 on v44) and concessionPct are formulas; unit-row offsets unitRowNum, unitAskPsf, unitEffRent and unitEffPsf are the template's serial and its three derived columns; every offset of every subtotal row and of rowTotals is a formula. Subject side, only E4/G4/H4 and G6:G175 are inputs — B is an array formula and C/D/F/H are formulas.",
+    "_neverWriteNote": "Asserted in build_schema.py against compsTab.offsets rather than restated as numbers: row 4 offsets totalUnits (=Z176 on v44) and concessionPct are formulas; unit-row offsets unitRowNum, unitAskPsf, unitEffRent and unitEffPsf are the template's serial and its three derived columns; every offset of every subtotal row and of rowTotals is a formula. Subject side, the inputs are E4/G4/H4, G6:G175, and (since 2026-11-17, `attr` below, resolved against compsTab.subjectAttrCols) the attribute band's value cells C (Physical), F (Amenities) and G/H (FEES label/$) — B is an array formula, C/D/F/H in the unit sections are formulas, and B/D in the band are the template's own labels, never written.",
     "dashCells": [
       {
         "row": 5,
@@ -1375,6 +1388,13 @@ window.SCHEMA = {
       "_feeOptionalOneTimeNote": "Optional Fees (122-126) and One-Time Fees (128-132) exist on the template but do NOT feed Eff. $/Mo and are out of scope for this pass, same as MF. Only 3 of One-Time's 5 rows carry a pre-printed label live (Application Fee/Admin Fee/Pet Deposit, rows 128-130); 131-132 are blank continuations of the same band, mirroring the Mandatory band's 2 blank dropdown slots.",
       "subjectMktRentCol": 7,
       "subjectUnitCountCol": 3,
+      "_subjectAttrColsNote": "Added 2026-11-17 for subject attribute capture. The SUBJECT block of the attribute band does NOT use the comp offsets: it is packed into B:H (7 columns) where a comp block spans 9. Physical label B / value C, Amenity label D / value F (E is spacer), FEES label G / $/Mo H. Absolute columns, like subjectMktRentCol. Read off SHIR_MF_Template_v65 and SHIR_ExStay_Template_v65 (identical in both, and identical to v57/v56): no formula anywhere in B:I of the band, no seeded constant in C/F/H, nothing on any other sheet references these cells, and the template's own alloc dropdown sits at F253:F257 (MF) / F167:F171 (ExStay) - i.e. on the amenity VALUE column. populate_comps-v50.py subject_attributes() reads the same cells (label+1, label+4) to score the best comp, so a captured subject now feeds that pick. Confirmed on a real file: Hedge Plus ModPack v20 carries 70+ subject values in exactly these columns.",
+      "subjectAttrCols": {
+        "physicalValue": 3,
+        "amenityValue": 6,
+        "feeLabel": 7,
+        "feeValue": 8
+      },
       "rollupCols": {
         "index": 18,
         "name": 19,
@@ -2233,6 +2253,12 @@ window.SCHEMA = {
         ],
         "unitCols": [
           7
+        ],
+        "attr": [
+          "physicalValue",
+          "amenityValue",
+          "feeLabel",
+          "feeValue"
         ]
       },
       "_neverWriteNote": "Same shape as MF's pasteMap._neverWriteNote — row 2 is a live column-index chain, unit-row offsets 0/5/6/7 and every subtotal/rowTotals row is a formula, subject side only E4/G4/H4 and G6:G75 are inputs. Row bound is $DJ$184 here (amenRowLast, the tallest ExStay band) instead of MF's $DJ$269 — the same 'widen to the tallest band' rule, just a shorter tallest band.",

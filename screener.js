@@ -492,10 +492,15 @@
     const phys = PHYSICAL;
     const amen = AMENITIES;
     const fees = compsFees();
-    const src = isSubject
-      ? '<span class="src" title="The tracker does not capture attributes on the subject yet — see Comp Screen Design.md §9.1">not captured</span>'
+    /* The subject's band has been captured since 2026-11-17 (tab 1, or Import
+       from Proforma). The badge now says so only when nothing is recorded yet,
+       and points at where to fill it, instead of claiming the tracker cannot. */
+    const src = isSubject && !subjectBandHasData(who)
+      ? '<span class="src" title="Nothing recorded for the subject yet — fill it on tab 1, or import it from the proforma">not captured</span>'
       : '';
-    const P = (who && who.physical) || {};
+    const P = isSubject && who
+      ? PHYSICAL.reduce((a, it) => { a[it.key] = subjectPhysicalValue(it, who); return a; }, {})
+      : ((who && who.physical) || {});
     const A = (who && who.amenities) || {};
     const F = (who && who.fees) || {};
     return attrPanel('Physical', phys, it => P[it.key], triGlyph, src)

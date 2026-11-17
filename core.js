@@ -392,6 +392,7 @@ function hydrateProperty(p) {
   if (p.subject.wd_type && WD_TYPE_MIGRATION[p.subject.wd_type]) {
     p.subject.wd_type = WD_TYPE_MIGRATION[p.subject.wd_type];
   }
+  hydrateSubjectBand(p.subject);
   if (!Array.isArray(p.subjectUnitMix)) p.subjectUnitMix = [];
   if (!Array.isArray(p.comps)) p.comps = [];
   p.marketRents = p.marketRents || {};
@@ -419,6 +420,40 @@ const WD_TYPE_MIGRATION = {
   'Comm. Laundry': 'No W/D',
   'None': 'No W/D',
 };
+
+/* The subject's half of the COMPS attribute band (2026-11-17): the same three
+   bags a comp carries, keyed identically, so every widget, writer and reader
+   that handles a comp's band handles the subject's with no special case beyond
+   WHERE the cells sit (compsTab.subjectAttrCols — the subject block is packed
+   into B:H and does not share the comp offsets). Absent on every record saved
+   before this, which hydrates to all-blank — blank meaning "not captured", the
+   same as a comp nobody researched. Keys follow the open family's getters, and
+   both families share one key vocabulary, so a family switch loses nothing. */
+function hydrateSubjectBand(s) {
+  s.physical = Object.assign(blankPhysical(), s.physical || {});
+  s.amenities = Object.assign(blankAmenities(), s.amenities || {});
+  s.fees = Object.assign(blankFees(), s.fees || {});
+  return s;
+}
+
+/* One subject Physical value, as the writers should emit it. `stories` is the
+   one key the band shares with the subject's basics (subjectFields.stories, the
+   field the analyst fills first), so a blank band Stories falls back to it
+   rather than making anyone type the number twice. A value typed into the band
+   always wins. Every other key is the band's own. */
+function subjectPhysicalValue(item, s) {
+  const own = s && s.physical ? s.physical[item.key] : '';
+  if (item.key === 'stories' && String(own == null ? '' : own).trim() === '') return s ? s.stories : '';
+  return own;
+}
+
+/** True when the subject has at least one band value captured. */
+function subjectBandHasData(s) {
+  if (!s) return false;
+  const any = (bag, items) => items.some(it => attrOut(it, bag && bag[it.key]) !== '');
+  const fees = (SCHEMA.fees || []).some(f => s.fees && String(s.fees[f.key] == null ? '' : s.fees[f.key]).trim() !== '');
+  return any(s.physical, PHYSICAL) || any(s.amenities, AMENITIES) || fees;
+}
 
 function hydrateComp(c) {
   if (!c.compId) c.compId = uid();

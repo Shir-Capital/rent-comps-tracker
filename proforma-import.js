@@ -673,6 +673,25 @@ function pfReadComps(ws) {
     ? { attrs: schemaBlock(PHYSICAL, S), amens: schemaBlock(AMENITIES, S + 2), fees: feeBlock() }
     : { attrs: [], amens: [], fees: [] };
 
+  /* The SUBJECT's values in that band (2026-11-17). The label blocks above were
+     always read off the subject's own label columns (B, D, G) and then only
+     used for the comps; the subject's answers sat beside them unread. They live
+     at compsTab.subjectAttrCols (C / F / G:H on both v65 templates) — the
+     subject block is packed into B:H and does NOT share the comp offsets, so
+     the comp reader's b + 2 / b + 5 would read the wrong column here. Taken
+     relative to the detected subject column S, so a file whose subject block
+     sits elsewhere still reads its own columns. Same rows, same label
+     verification as the comps: only label-matched rows are read. */
+  const sac = TAB.subjectAttrCols;
+  if (attrHdr && sac) {
+    const sc = col => S + (col - 2);
+    subject.attrs = blocks.attrs.map(([r, l, k]) => [l, pfDisplay(ws, r, sc(sac.physicalValue)), k]);
+    subject.amens = blocks.amens.map(([r, l, k]) => [l, pfDisplay(ws, r, sc(sac.amenityValue)), k]);
+    subject.fees = blocks.fees.map(([r]) => [pfS(pfV(ws, r, sc(sac.feeLabel))), pfV(ws, r, sc(sac.feeValue))]);
+  } else {
+    subject.attrs = []; subject.amens = []; subject.fees = [];
+  }
+
   // ---- comp blocks: starts from the comp-number cells on row 3
   const starts = [];
   for (let c = S + 8; c <= maxCol; c++) {
@@ -864,6 +883,78 @@ function pfMatchFee(label) {
       || null;
 }
 
+/* Convert one block's raw band read ({attrs, amens, fees} as pfReadComps
+   returns them) into a record's physical / amenities / fees bags. Shared by
+   every comp AND the subject (2026-11-17), so the two are typed and fee-matched
+   identically: by KEY and TYPE for attributes, by LABEL for fees, unmatched fees
+   kept in fees.unmatched rather than dropped. `notes` collects what could not be
+   placed. This is the body that used to sit inline in pfToImport's comp loop. */
+function pfApplyBand(target, raw, notes) {
+  const byKey = (items) => items.reduce((a, it) => { a[it.key] = it; return a; }, {});
+  const physByKey = byKey(PHYSICAL), amenByKey = byKey(AMENITIES);
+  const readAttr = (bag, lookup, lbl, val, key) => {
+    const it = lookup[key];
+    if (!it) return;
+    if (it.type === 'tri' || !it.type) {
+      const [t, extra] = pfTri(val);
+      bag[key] = t;
+      if (extra) notes.push(lbl + ': ' + extra);
+      return;
+    }
+    const s = pfS(val);
+    if (it.type === 'count' || it.type === 'number') {
+      const n = pfN(val);
+      /* A count column that still holds legacy Y/N: 'Y' is a floor of 1, not a
+         reading, exactly as the write side treats it. */
+      bag[key] = n !== null ? String(n)
+        : (s === 'Y' ? '1' : (s === 'N' ? '0' : ''));
+      if (n === null && s && s !== 'Y' && s !== 'N') notes.push(lbl + ': ' + s);
+    } else {
+      bag[key] = s || pfText(val);   // text, and alloc's two dropdown strings
+    }
+  };
+  (raw.attrs || []).forEach(([lbl, val, key]) => readAttr(target.physical, physByKey, lbl, val, key));
+  (raw.amens || []).forEach(([lbl, val, key]) => readAttr(target.amenities, amenByKey, lbl, val, key));
+  /* Fees are matched BY LABEL, per comp. The band's row order is not a
+     contract: v8 made these cells dropdowns and dropped five of the eight v7
+     defaults, and analysts free-type per comp — in this very file, comp 2 has
+     `V Trash` / `Adm Trash` on the rows where comp 1 has the v7 set. Reading
+     the label and then assigning by INDEX (which is what this did until
+     2026-08-08) files a valet-trash charge as insurance, and the fee column is
+     summed into every unit's Eff. $/Mo. */
+  (raw.fees || []).forEach(([lbl, val]) => {
+    const label = pfS(lbl);
+    const hasVal = pfN(val) !== null || pfS(val);
+    if (!hasVal) return;
+    if (!label) {
+      // The v7 band's 9th row has no label but IS inside the Eff. $/Mo SUM.
+      notes.push('Fee with no label: ' + pfS(val) + ' — it is still summed into Eff. $/Mo');
+      return;
+    }
+    const f = pfMatchFee(label);
+    if (f && pfN(val) !== null) target.fees[f.key] = pfNumStr(val);
+    else if (f) notes.push('Fee ' + label + ': ' + pfS(val));
+    else {
+      /* A real charge the tracker has no field for. Every one is kept now, not
+         just the first: `other` is a single slot, and a real ModPack comp
+         carries up to five free-typed labels (Alma: Trash, Pest, Utility Bill
+         Fee, Res. Utility, Community Fee), so the old `!target.fees.other` guard
+         silently dropped four of them. The first still fills other/other_label
+         for compatibility; the full list rides along so nothing is lost and the
+         import summary can show what needs a home. */
+      notes.push('Fee ' + label + ': ' + (pfN(val) !== null ? pfNumStr(val) : pfS(val)) + ' (no tracker field for this label)');
+      if (pfN(val) !== null) {
+        target.fees.unmatched = target.fees.unmatched || [];
+        target.fees.unmatched.push({ label, amount: pfNumStr(val) });
+        if (!target.fees.other) {
+          target.fees.other = pfNumStr(val);
+          target.fees.other_label = label;
+        }
+      }
+    }
+  });
+}
+
 function pfToImport(det) {
   const warn = [];
   /* Dropdown values the workbook carries that its own validation list does not
@@ -1020,6 +1111,20 @@ function pfToImport(det) {
       + 'imported unit mix and were not carried over — the section figure still applies to them');
   }
 
+  /* The subject's attribute band (2026-11-17), through the same pfApplyBand()
+     the comps use. Kept apart from `subject` (the basics) because it applies
+     under its own checkbox: an analyst can take the workbook's attributes
+     without its basics, or the reverse. */
+  const subjectBand = hydrateSubjectBand({});
+  const subjectBandNotes = [];
+  pfApplyBand(subjectBand, det.subject, subjectBandNotes);
+  const bandCount = (bag, items) => items.filter(it => String(bag[it.key] == null ? '' : bag[it.key]).trim() !== '').length;
+  const subjectBandFilled = bandCount(subjectBand.physical, PHYSICAL) + bandCount(subjectBand.amenities, AMENITIES)
+    + (SCHEMA.fees || []).filter(f => String(subjectBand.fees[f.key] == null ? '' : subjectBand.fees[f.key]).trim() !== '').length;
+  if (subjectBandNotes.length) {
+    warn.push('Subject attributes: ' + subjectBandNotes.join(' | '));
+  }
+
   const comps = det.comps.slice(0, MAX_COMPS).map(c => {
     const comp = newComp();
     const notes = [];
@@ -1046,69 +1151,7 @@ function pfToImport(det) {
        'Pitched shingle' roof into blank and a pool COUNT of 3 into blank, which
        is how 61 of the 79 fields would have imported once the band was expanded
        past the original Y/N-only nine. */
-    const byKey = (items) => items.reduce((a, it) => { a[it.key] = it; return a; }, {});
-    const physByKey = byKey(PHYSICAL), amenByKey = byKey(AMENITIES);
-    const readAttr = (bag, lookup, lbl, val, key) => {
-      const it = lookup[key];
-      if (!it) return;
-      if (it.type === 'tri' || !it.type) {
-        const [t, extra] = pfTri(val);
-        bag[key] = t;
-        if (extra) notes.push(lbl + ': ' + extra);
-        return;
-      }
-      const s = pfS(val);
-      if (it.type === 'count' || it.type === 'number') {
-        const n = pfN(val);
-        /* A count column that still holds legacy Y/N: 'Y' is a floor of 1, not a
-           reading, exactly as the write side treats it. */
-        bag[key] = n !== null ? String(n)
-          : (s === 'Y' ? '1' : (s === 'N' ? '0' : ''));
-        if (n === null && s && s !== 'Y' && s !== 'N') notes.push(lbl + ': ' + s);
-      } else {
-        bag[key] = s || pfText(val);   // text, and alloc's two dropdown strings
-      }
-    };
-    (c.attrs || []).forEach(([lbl, val, key]) => readAttr(comp.physical, physByKey, lbl, val, key));
-    (c.amens || []).forEach(([lbl, val, key]) => readAttr(comp.amenities, amenByKey, lbl, val, key));
-    /* Fees are matched BY LABEL, per comp. The band's row order is not a
-       contract: v8 made these cells dropdowns and dropped five of the eight v7
-       defaults, and analysts free-type per comp — in this very file, comp 2 has
-       `V Trash` / `Adm Trash` on the rows where comp 1 has the v7 set. Reading
-       the label and then assigning by INDEX (which is what this did until
-       2026-08-08) files a valet-trash charge as insurance, and the fee column is
-       summed into every unit's Eff. $/Mo. */
-    (c.fees || []).forEach(([lbl, val]) => {
-      const label = pfS(lbl);
-      const hasVal = pfN(val) !== null || pfS(val);
-      if (!hasVal) return;
-      if (!label) {
-        // The v7 band's 9th row has no label but IS inside the Eff. $/Mo SUM.
-        notes.push('Fee with no label: ' + pfS(val) + ' — it is still summed into Eff. $/Mo');
-        return;
-      }
-      const f = pfMatchFee(label);
-      if (f && pfN(val) !== null) comp.fees[f.key] = pfNumStr(val);
-      else if (f) notes.push('Fee ' + label + ': ' + pfS(val));
-      else {
-        /* A real charge the tracker has no field for. Every one is kept now, not
-           just the first: `other` is a single slot, and a real ModPack comp
-           carries up to five free-typed labels (Alma: Trash, Pest, Utility Bill
-           Fee, Res. Utility, Community Fee), so the old `!comp.fees.other` guard
-           silently dropped four of them. The first still fills other/other_label
-           for compatibility; the full list rides along so nothing is lost and the
-           import summary can show what needs a home. */
-        notes.push('Fee ' + label + ': ' + pfS(val) + ' (no tracker field for this label)');
-        if (pfN(val) !== null) {
-          comp.fees.unmatched = comp.fees.unmatched || [];
-          comp.fees.unmatched.push({ label, amount: pfNumStr(val) });
-          if (!comp.fees.other) {
-            comp.fees.other = pfNumStr(val);
-            comp.fees.other_label = label;
-          }
-        }
-      }
-    });
+    pfApplyBand(comp, c, notes);
 
     comp.unitMix = c.types.map(t => {
       const r = newUnitRow();
@@ -1188,7 +1231,7 @@ function pfToImport(det) {
   });
 
   return { subject, subjectUnitMix, comps, marketRents, warnings: warn, stride: det.stride,
-           mixSource, mixTotals, plansSeeded };
+           mixSource, mixTotals, plansSeeded, subjectBand, subjectBandFilled };
 }
 
 // ------------------------------------------------------------------ the UI
@@ -1307,6 +1350,7 @@ function pfPreviewHtml() {
     <hr class="hr-soft"/>
     <div class="pf-grps">
       ${grp('pf-g-subject', 'Subject basics', Object.keys(p.subject).filter(k => p.subject[k] !== '').length, '')}
+      ${grp('pf-g-sband', 'Subject attributes & fees', p.subjectBandFilled || 0, '')}
       ${grp('pf-g-mix', 'Subject unit mix', p.subjectUnitMix.length, nMix ? 'replaces ' + nMix : '')}
       ${grp('pf-g-comps', 'Comps', p.comps.length, nComps ? 'replaces ' + nComps : '')}
       ${grp('pf-g-rents', 'Market rent overrides', Object.keys(p.marketRents).length, '')}
@@ -1427,7 +1471,8 @@ function pfApply() {
   const want = id => { const el = $('#' + id); return !!(el && el.checked && !el.disabled); };
   const doSubject = want('pf-g-subject'), doMix = want('pf-g-mix');
   const doComps = want('pf-g-comps'), doRents = want('pf-g-rents');
-  if (!doSubject && !doMix && !doComps && !doRents) { toast('Nothing checked'); return; }
+  const doBand = want('pf-g-sband');
+  if (!doSubject && !doMix && !doComps && !doRents && !doBand) { toast('Nothing checked'); return; }
 
   /* Two-press confirmation rather than confirm(). A native dialog cannot be
      dismissed by anything driving this page, and this is the one button in the
@@ -1446,6 +1491,27 @@ function pfApply() {
   if (doSubject) {
     Object.keys(p.subject).forEach(k => { if (p.subject[k] !== '') STATE.subject[k] = p.subject[k]; });
     applied.push('subject basics');
+  }
+  /* Subject attributes & fees (2026-11-17). MERGED, the way subject basics
+     are: only a field the workbook actually fills overwrites, so a blank cell
+     in an older proforma never erases something captured on site. Unmatched
+     fees (charges the tracker has no field for) are replaced as a set — they
+     are the workbook's list, not a field anyone types. */
+  if (doBand && p.subjectBand) {
+    hydrateSubjectBand(STATE.subject);
+    let n = 0;
+    ['physical', 'amenities', 'fees'].forEach(bag => {
+      const src = p.subjectBand[bag] || {};
+      Object.keys(src).forEach(k => {
+        if (k === 'unmatched') return;
+        const v = src[k];
+        if (v == null || String(v).trim() === '') return;
+        STATE.subject[bag][k] = v;
+        n++;
+      });
+    });
+    if (Array.isArray(p.subjectBand.fees.unmatched)) STATE.subject.fees.unmatched = p.subjectBand.fees.unmatched.slice();
+    applied.push(n + ' subject attribute' + (n === 1 ? '' : 's') + ' & fees');
   }
   if (doMix) {
     STATE.subjectUnitMix = p.subjectUnitMix.map(r => Object.assign({}, r, { id: uid() }));

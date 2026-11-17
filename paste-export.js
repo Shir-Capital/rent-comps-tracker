@@ -98,6 +98,17 @@ function pxIsWritable(row, col) {
     if (row >= BUCKETS[0].startRow && row <= BUCKETS[BUCKETS.length - 1].endRow) {
       return (sw.unitCols || []).indexOf(col) !== -1;     // column G only
     }
+    /* The subject's attribute band (2026-11-17). Its columns are NAMED in
+       compsTab.subjectAttrCols (the subject block is packed into B:H and does
+       not share the comp offsets) and listed in subjectWritable.attr; each
+       column is allowed only inside its OWN band's rows, exactly as the comp
+       side does with isOff(). B and D, the template's labels, can never match,
+       and build_schema.py refuses a map that would point at them. */
+    const sac = TAB.subjectAttrCols || {};
+    const sIs = name => (sw.attr || []).indexOf(name) !== -1 && sac[name] === col;
+    if (row >= TAB.physRowFirst && row <= TAB.physRowLast && sIs('physicalValue')) return true;
+    if (row >= TAB.amenRowFirst && row <= TAB.amenRowLast && sIs('amenityValue')) return true;
+    if (row >= TAB.feeRowFirst && row <= TAB.feeRowLast && (sIs('feeLabel') || sIs('feeValue'))) return true;
     return false;                                         // B array formula, C/D/F/H computed
   }
 
@@ -150,7 +161,7 @@ function pxBuildMirror(tgt) {
   const cells = {};            // 'r:c' -> { v, who, what }
   const warn = [];
   const clears = [];
-  const stats = { comps: 0, unitRows: 0, fees: 0, planRents: 0, cells: 0 };
+  const stats = { comps: 0, unitRows: 0, fees: 0, planRents: 0, cells: 0, subjectAttrs: 0, subjectFees: 0 };
   const off = TAB.offsets || {};
   const s = STATE.subject || {};
 
@@ -167,6 +178,72 @@ function pxBuildMirror(tgt) {
         ' (' + what + ') — not an input cell on ' + (TAB.templateVersion || 'this template'));
     }
     cells[row + ':' + col] = { v: v, who: who, what: what };
+  };
+
+  /* FEES: a fee's identity is its LABEL, never its row. Shared by every comp
+     slot AND the subject (2026-11-17): the two must route a fee identically,
+     and before this the logic lived inline in the comp loop. `labels` is the
+     destination's existing labels for this block ({row: text}) or null for
+     generic mode; labelCol/valueCol are absolute columns. Returns how many fees
+     were captured and how many were placed. */
+  const putFees = (feeBag, labels, labelCol, valueCol, who) => {
+    const fees = (SCHEMA.fees || []).filter(f => f.compsLabel &&
+      numOrNull(feeBag[f.key]) != null && numOrNull(feeBag[f.key]) !== '');
+    let placed = 0;
+    if (fees.length) {
+      /* Rows the destination already labels for this comp, so we write the
+         value and leave the label alone. Analysts free-type these (Lantern comp
+         2 carries "V Trash" where comp 1 has the v7 defaults) and the fee column
+         is summed into every unit's Eff. $/Mo, so writing the same fee onto a
+         second row would double-charge the comp with nothing on screen to say
+         why. */
+      const taken = {};
+      const spare = [];
+      if (labels) {
+        for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
+          if (!labels[r]) spare.push(r);
+        }
+      }
+      fees.forEach(f => {
+        const v = numOrNull(feeBag[f.key]);
+        let row = null;
+        if (labels) {
+          for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
+            if (!taken[r] && labels[r] && pxNorm(labels[r]) === pxNorm(f.compsLabel)) { row = r; break; }
+          }
+          if (row) {
+            taken[row] = true;
+            put(row, valueCol, v, who, 'Fee — ' + f.compsLabel + ' (existing row)');
+            placed++;
+            return;
+          }
+          row = spare.shift() || null;
+          if (row == null) {
+            warn.push(who + ': fee "' + f.compsLabel + '" ($' + v + ') NOT written — ' +
+              'no free labelled row (' + TAB.feeRowFirst + '-' + TAB.feeRowLast + ') left on that comp');
+            return;
+          }
+        } else {
+          /* Generic mode. The template pre-labels the first rows and leaves the
+             rest as blank dropdowns, so we write label + value as a pair, in
+             fee order, from the top. Self-consistent on a fresh workbook; on a
+             used one it can duplicate a fee the analyst already typed further
+             down, which is why the READ ME points at the aligned export and the
+             CLEAR FIRST sheet lists the fee band. */
+          row = TAB.feeRowFirst + Object.keys(taken).length;
+          if (row > TAB.feeRowLast) {
+            warn.push(who + ': fee "' + f.compsLabel + '" ($' + v + ') NOT written — ' +
+              'more fees than labelled rows');
+            return;
+          }
+          taken[row] = true;
+        }
+        put(row, labelCol, f.compsLabel, who, 'Fee label — ' + f.compsLabel);
+        put(row, valueCol, v, who, 'Fee — ' + f.compsLabel);
+        placed++;
+      });
+    }
+    return { placed: placed, captured: fees.length };
   };
 
   // ------------------------------------------------------------- subject
@@ -193,6 +270,29 @@ function pxBuildMirror(tgt) {
     } else {
       warn.push(planKeys.length + ' per-plan market rent' + (planKeys.length === 1 ? '' : 's') +
         ' NOT written — column G is resolved by plan label, which needs the deal workbook attached');
+    }
+  }
+
+  /* The subject's attribute band (2026-11-17): Physical at column C, Amenities
+     at F, FEES label/$ at G/H (compsTab.subjectAttrCols, never the comp
+     offsets). Same attrOut() typing as the comp side, so a tri is Y/N, a count
+     is a number, and a blank stays blank and is therefore skipped: skip-blanks
+     leaves whatever the workbook already holds. Stories falls back to the
+     basics' Stories when the band value is blank (subjectPhysicalValue). Rows
+     are the schema's, which verify_against_template.py label-checks at B / D. */
+  const sac = TAB.subjectAttrCols;
+  if (sac && ((PX_MAP.subjectWritable || {}).attr || []).length) {
+    const before = Object.keys(cells).length;
+    PHYSICAL.forEach(pa => put(pa.row, sac.physicalValue, attrOut(pa, subjectPhysicalValue(pa, s)), 'Subject', pa.label));
+    AMENITIES.forEach(am => put(am.row, sac.amenityValue, attrOut(am, (s.amenities || {})[am.key]), 'Subject', am.label));
+    stats.subjectAttrs = Object.keys(cells).length - before;
+    const sf = putFees(s.fees || {}, tgt ? (tgt.subjectFeeLabels || {}) : null, sac.feeLabel, sac.feeValue, 'Subject');
+    stats.subjectFees = sf.placed;
+    if (!tgt && sf.captured) {
+      clears.push({
+        what: 'Subject — fee labels + $ (generic mode only)',
+        range: colLetter(sac.feeLabel) + TAB.feeRowFirst + ':' + colLetter(sac.feeValue) + TAB.feeRowLast,
+      });
     }
   }
 
@@ -293,63 +393,11 @@ function pxBuildMirror(tgt) {
     PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, attrOut(pa, c.physical[pa.key]), who, pa.label));
     AMENITIES.forEach(am => put(am.row, base + off.amenityValue, attrOut(am, c.amenities[am.key]), who, am.label));
 
-    // ---- FEES: a fee's identity is its LABEL, never its row ---------------
-    const fees = (SCHEMA.fees || []).filter(f => f.compsLabel &&
-      numOrNull(c.fees[f.key]) != null && numOrNull(c.fees[f.key]) !== '');
-    if (fees.length) {
-      const labels = tgt ? (tgt.feeLabels[slot] || {}) : null;
-      /* Rows the destination already labels for this comp, so we write the
-         value and leave the label alone. Analysts free-type these (Lantern comp
-         2 carries "V Trash" where comp 1 has the v7 defaults) and the fee column
-         is summed into every unit's Eff. $/Mo, so writing the same fee onto a
-         second row would double-charge the comp with nothing on screen to say
-         why. */
-      const taken = {};
-      const spare = [];
-      if (labels) {
-        for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
-          if (!labels[r]) spare.push(r);
-        }
-      }
-      fees.forEach(f => {
-        const v = numOrNull(c.fees[f.key]);
-        let row = null;
-        if (labels) {
-          for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
-            if (!taken[r] && labels[r] && pxNorm(labels[r]) === pxNorm(f.compsLabel)) { row = r; break; }
-          }
-          if (row) {
-            taken[row] = true;
-            put(row, base + off.feeValue, v, who, 'Fee — ' + f.compsLabel + ' (existing row)');
-            stats.fees++;
-            return;
-          }
-          row = spare.shift() || null;
-          if (row == null) {
-            warn.push(who + ': fee "' + f.compsLabel + '" ($' + v + ') NOT written — ' +
-              'no free labelled row (' + TAB.feeRowFirst + '-' + TAB.feeRowLast + ') left on that comp');
-            return;
-          }
-        } else {
-          /* Generic mode. The template pre-labels the first rows and leaves the
-             rest as blank dropdowns, so we write label + value as a pair, in
-             fee order, from the top. Self-consistent on a fresh workbook; on a
-             used one it can duplicate a fee the analyst already typed further
-             down, which is why the READ ME points at the aligned export and the
-             CLEAR FIRST sheet lists the fee band. */
-          row = TAB.feeRowFirst + Object.keys(taken).length;
-          if (row > TAB.feeRowLast) {
-            warn.push(who + ': fee "' + f.compsLabel + '" ($' + v + ') NOT written — ' +
-              'more fees than labelled rows');
-            return;
-          }
-          taken[row] = true;
-        }
-        put(row, base + off.feeLabel, f.compsLabel, who, 'Fee label — ' + f.compsLabel);
-        put(row, base + off.feeValue, v, who, 'Fee — ' + f.compsLabel);
-        stats.fees++;
-      });
-    }
+    // ---- FEES: by label, through the shared putFees() ---------------------
+    const feeRes = putFees(c.fees, tgt ? (tgt.feeLabels[slot] || {}) : null,
+      base + off.feeLabel, base + off.feeValue, who);
+    stats.fees += feeRes.placed;
+    const fees = { length: feeRes.captured };   // read by the generic-mode CLEAR FIRST entry below
 
     /* CLEAR FIRST. Only for a slot that already holds data — on a fresh template
        the step does not arise. One range per slot: Go To Special -> Constants
@@ -462,9 +510,22 @@ function pxReadTarget(buf, fileName) {
     slotHasData[i] = hasData;
   });
 
+  /* The subject's own fee labels (2026-11-17), column G on the Mandatory rows,
+     read for the same reason each comp's are: write a fee onto the row already
+     carrying its label, never onto a second row that would double it. */
+  const subjectFeeLabels = {};
+  const sacT = TAB.subjectAttrCols;
+  if (sacT) {
+    for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
+      const lb = pxS(ws, r, sacT.feeLabel);
+      if (lb) subjectFeeLabels[r] = lb;
+    }
+  }
+
   return {
     fileName: fileName || 'workbook.xlsx',
     totalUnits: totalUnits,
+    subjectFeeLabels: subjectFeeLabels,
     planRows: planRows, planList: planList,
     slotNames: slotNames, slotByName: slotByName,
     feeLabels: feeLabels, slotHasData: slotHasData,
@@ -527,7 +588,7 @@ async function pxBuildWorkbook(mirror) {
     ws.addRow([]);
     line('STEP 1', 'In THIS file: click the Name Box (left of the formula bar), type PASTE_COMPS, press Enter, then Ctrl+C.', true);
     line('STEP 2', 'In the DEAL workbook, COMPS tab: click cell Y3, then Alt E S  →  choose Values  →  tick "Skip blanks"  →  OK.', true);
-    line('STEP 3', 'Repeat with PASTE_SUBJECT, pasting at cell B3. (Per-plan market rents, W/D, utilities.)', true);
+    line('STEP 3', 'Repeat with PASTE_SUBJECT, pasting at cell B3. (Per-plan market rents, W/D, utilities, and the subject’s attributes, amenities and fees in columns C / F / G:H.)', true);
     ws.addRow([]);
     line('WHY SKIP BLANKS', 'Every formula cell is left EMPTY in this file, so "Skip blanks" makes the paste a no-op on all of them. '
       + 'Without that tick the paste will destroy the subtotal rows, the Eff. $/Mo columns and column B’s array formula. It is not optional.', true);
@@ -541,6 +602,8 @@ async function pxBuildWorkbook(mirror) {
     line('Comps', String(mirror.stats.comps));
     line('Unit rows', String(mirror.stats.unitRows));
     line('Fees', String(mirror.stats.fees));
+    line('Subject attributes', String(mirror.stats.subjectAttrs || 0));
+    line('Subject fees', String(mirror.stats.subjectFees || 0));
     line('Per-plan market rents', mirror.aligned ? String(mirror.stats.planRents) : '0 (needs the workbook)');
     ws.addRow([]);
     line('ALSO WRITTEN', 'Row 4 W/D type and Utilities are validated dropdowns that populate_comps deliberately leaves alone. '
