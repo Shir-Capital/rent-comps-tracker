@@ -170,9 +170,17 @@ function pxBuildMirror(tgt) {
      would paste over an array formula and blank it. Throwing (rather than
      dropping) is deliberate — a self-check that silently skips is a self-check
      that isn't there. */
+  const formulaSkips = [];
   const put = (row, col, v, who, what) => {
     if (v == null || v === '') return;
     if (typeof v === 'number' && !isFinite(v)) return;
+    /* Aligned mode: the deal workbook computes this cell, so a value pasted
+       here would replace its formula. Skipped and reported — see the
+       formulaCells note in pxReadTarget(). Generic mode has no workbook to ask. */
+    if (tgt && tgt.formulaCells && tgt.formulaCells.has(row + ':' + col)) {
+      formulaSkips.push(colLetter(col) + row + ' (' + who + ' — ' + what + ')');
+      return;
+    }
     if (!pxIsWritable(row, col)) {
       throw new Error('paste-export refused ' + colLetter(col) + row +
         ' (' + what + ') — not an input cell on ' + (TAB.templateVersion || 'this template'));
@@ -420,6 +428,13 @@ function pxBuildMirror(tgt) {
     }
   });
 
+  if (formulaSkips.length) {
+    warn.push(formulaSkips.length + ' cell' + (formulaSkips.length === 1 ? '' : 's') +
+      ' NOT written because ' + (tgt ? tgt.fileName : 'the workbook') + ' holds a FORMULA there ' +
+      '(the template has an input; this file computes it, so pasting would destroy the formula): ' +
+      formulaSkips.slice(0, 12).join(', ') + (formulaSkips.length > 12 ? ', …' : ''));
+  }
+  stats.formulaSkips = formulaSkips.length;
   stats.cells = Object.keys(cells).length;
   return { cells: cells, warn: warn, clears: clears, stats: stats, aligned: !!tgt, tgt: tgt };
 }
@@ -522,9 +537,38 @@ function pxReadTarget(buf, fileName) {
     }
   }
 
+  /* Every cell the DEAL workbook computes (2026-11-17). pxIsWritable() knows the
+     TEMPLATE's formulas; it cannot know a formula an analyst or a filler script
+     typed into a cell the template leaves as an input. Found on Hedge Plus
+     ModPack v20: row 4's W/D type and Utilities cells (subject G4/H4 and every
+     comp's offsets 6/7) are template DROPDOWNS, but that file derives them from
+     the band's Y/N rows with =IF(...) — and a real Excel paste of the aligned
+     mirror replaced 19 of those formulas with typed values. So in aligned mode
+     every such cell is refused here (pxBuildMirror's put() checks this set) and
+     reported, rather than trusted to the template map. SheetJS marks a formula
+     with `.f`; an array formula carries its range in `.F` on the anchor, which
+     is expanded so every cell it spans is protected. */
+  const formulaCells = new Set();
+  Object.keys(ws).forEach(addr => {
+    if (addr[0] === '!') return;
+    const cell = ws[addr];
+    if (!cell) return;
+    if (cell.F) {
+      const rg = XLSX.utils.decode_range(cell.F);
+      for (let r = rg.s.r; r <= rg.e.r; r++) {
+        for (let c = rg.s.c; c <= rg.e.c; c++) formulaCells.add((r + 1) + ':' + (c + 1));
+      }
+    }
+    if (cell.f) {
+      const rc = XLSX.utils.decode_cell(addr);
+      formulaCells.add((rc.r + 1) + ':' + (rc.c + 1));
+    }
+  });
+
   return {
     fileName: fileName || 'workbook.xlsx',
     totalUnits: totalUnits,
+    formulaCells: formulaCells,
     subjectFeeLabels: subjectFeeLabels,
     planRows: planRows, planList: planList,
     slotNames: slotNames, slotByName: slotByName,
