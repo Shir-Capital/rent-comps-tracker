@@ -1082,7 +1082,7 @@ function renderPhase1() {
 
     ${subjectBandHtml(s)}
 
-    <div class="card">
+    <div class="card" id="p1-drive-card">
       <div class="card-head"><span class="grow">Drive</span></div>
       <div class="card-body">
         <div class="kv"><span class="k">Deal folder</span><span class="v">${esc(STATE.drive.folderName || '— not linked —')}</span></div>

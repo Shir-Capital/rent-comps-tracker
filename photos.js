@@ -3,6 +3,10 @@
    Drag-and-drop comp photography, stored in the DEAL FOLDER on Drive.
 
    WHAT IT ADDS
+   (2026-11-18) A Subject Photos card on tab 1 — four slots written to
+   <deal>/11. Pictures/subject_<slot>.<ext>. See "SUBJECT PHOTOS" below; its
+   folder and names differ from a comp's, and both are contracts.
+
    A Photos card at the bottom of the expanded comp editor (tab 2), holding:
      * the four standard slots — Kitchen, Bathroom, Exterior, Amenities
      * one gallery per FLOOR PLAN, each taking many photos
@@ -401,6 +405,7 @@ async function phAccept(target, fileList) {
       for (const f of good) { await phWritePlanPhoto(comp, plan, f); n++; }
       toast(n + (n === 1 ? ' photo' : ' photos') + ' saved to ' + plan.folderName);
     }
+    phForgetScreener('comp:' + comp.compId);
     await phLoad(comp);
   } catch (e) {
     toast('Upload failed: ' + ((e && e.message) || e));
@@ -420,6 +425,7 @@ async function phDelete(fileId) {
     await phTrash(fileId);
     PH.urls.delete(fileId);
     toast('Photo moved to the Drive bin');
+    phForgetScreener('comp:' + comp.compId);
     await phLoad(comp);
   } catch (e) {
     toast('Could not remove it: ' + ((e && e.message) || e));
@@ -593,20 +599,29 @@ function phTargetOf(el) {
   const kind = el.getAttribute('data-ph-kind');
   if (!kind) return null;
   const v = el.getAttribute('data-ph-target');
+  if (kind === 'sslot') return { kind: 'sslot', slotKey: v };
   return kind === 'slot' ? { kind: 'slot', slotKey: v } : { kind: 'plan', planKey: v };
 }
 
 /* Bound per repaint on the tiles themselves rather than delegated from document,
    because dragover/dragleave need to toggle a class on the specific tile and a
    delegated handler would have to re-derive it on every mousemove-rate event. */
-function phWireZones(root) {
+function phWireZones(root, handlers) {
+  /* `handlers` lets the subject card (tab 1) reuse every gesture here while
+     routing to its own accept/delete — default is the comp card's pair. */
+  const h = handlers || { accept: phAccept, del: phDelete, xlsx: true };
   Array.from(root.querySelectorAll('[data-ph-kind]')).forEach(el => {
     if (el.tagName === 'INPUT') {
       el.onchange = () => {
         const t = phTargetOf(el);
-        const files = el.files;
+        /* COPY first. el.files is a LIVE FileList: `el.value = ''` empties that
+           same object in place, so passing el.files and then clearing handed
+           phAccept an empty list — tap-to-pick (the phone camera-roll path)
+           silently uploaded nothing from 1971e05 until 2026-11-18. Drag-and-drop
+           was unaffected (dataTransfer.files is not cleared). */
+        const files = Array.from(el.files || []);
         el.value = '';                 // so re-picking the same file fires again
-        if (t) phAccept(t, files);
+        if (t) h.accept(t, files);
       };
       return;
     }
@@ -621,7 +636,7 @@ function phWireZones(root) {
       ev.stopPropagation();
       el.classList.remove('over');
       const dt = ev.dataTransfer;
-      if (dt && dt.files && dt.files.length) phAccept(t, dt.files);
+      if (dt && dt.files && dt.files.length) h.accept(t, dt.files);
     };
     el.onclick = (ev) => {
       if (ev.target.closest('[data-ph-del]')) return;   // the ✕, not the tile
@@ -634,10 +649,11 @@ function phWireZones(root) {
     b.onclick = (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      phDelete(b.getAttribute('data-ph-del'));
+      h.del(b.getAttribute('data-ph-del'));
     };
   });
 
+  if (!h.xlsx) return;
   const x = document.getElementById('ph-xlsx');
   if (x) x.onclick = () => phExportIndex();
 }
@@ -761,6 +777,316 @@ async function phExportIndex() {
   }
 }
 
+
+// ============================================================================
+// SUBJECT PHOTOS (tab 1) — 2026-11-18
+// ============================================================================
+/* The subject's four photos live in a DIFFERENT folder with a DIFFERENT name
+   shape from a comp's, and both differences are contracts other code reads:
+
+       <deal>/11. Pictures/subject_kitchen.jpg
+       <deal>/11. Pictures/subject_bathroom.jpg
+       <deal>/11. Pictures/subject_exterior.jpg
+       <deal>/11. Pictures/subject_amenities.jpg   <- PLURAL, unlike a comp's amenity.jpg
+
+   Readers: screener.js resolvePhotos('subject') (filters /^subject[_-]/, then
+   pickSlot with amenities|amenity), the Rent Comps Unified skill's photo
+   populator manifest, and the MF / ExStay Init UW skills, which write these
+   same four names and post subject_exterior.jpg's link to Asana.
+
+   ⚠️ `11. Pictures` IS SHARED WITH THE ORIGINAL DEAL PACKAGE. The skills say
+   "write alongside, never delete" — broker photos, drone shots and OM images
+   live there too. So the replace step here trashes ONLY files whose base name is
+   exactly `subject_<alias>` / `subject-<alias>`. A file called `kitchen.jpg` or
+   `subject_kitchen_2.jpg` in that folder is never touched.
+
+   ⚠️ READ PATHS NEVER CREATE THE FOLDER. Opening tab 1 on a deal with no
+   `11. Pictures` yet must not litter the deal folder; the first drop creates it.
+
+   renderPhase1 replaces #phase-content wholesale on every unit-mix keystroke, so
+   the card re-mounts often. The folder read is cached per (subject, deal
+   folder) and only re-runs on a change of either, a reconnect, or ↻. */
+
+const PICTURES_FOLDER_NAME = '11. Pictures';
+const PHS_SLOTS = PH_SLOTS.map(s => ({
+  key: s.key, label: s.label,
+  file: 'subject_' + s.key,            // subject_amenities — the plural key, on purpose
+  aliases: s.aliases,
+}));
+
+const PHS = {
+  key: '',            // STATE.id + '|' + deal folder id the current read belongs to
+  state: 'idle',      // idle | loading | ok | nodrive | nofolder | error
+  err: '',
+  folderId: '',       // 11. Pictures, once it exists
+  slots: {},          // slotKey -> {id, name, mimeType}
+  others: 0,          // images in 11. Pictures that are not one of the four
+  busy: new Set(),
+};
+
+function phsKey() {
+  return STATE ? (STATE.id || '') + '|' + ((STATE.drive && STATE.drive.folderId) || '') : '';
+}
+
+/** Exact `subject_<alias>` or `subject-<alias>` — never a prefix or contains match. */
+function phsMatchesSlot(fileName, slot) {
+  const b = phBase(fileName);
+  return slot.aliases.some(a => b === 'subject_' + a || b === 'subject-' + a);
+}
+
+/* screener.js caches each strip for the session ('none' included). After a write
+   that strip is stale, so drop it; the Screener re-reads on its next paint. */
+function phForgetScreener(cacheKey) {
+  try {
+    const sc = window.SCREENER && window.SCREENER.state;
+    if (sc && sc.photos) delete sc.photos[cacheKey];
+  } catch (e) { /* Screener not loaded — nothing cached */ }
+}
+
+async function phsLoad() {
+  PHS.key = phsKey();
+  PHS.slots = {};
+  PHS.others = 0;
+  PHS.folderId = '';
+  PHS.err = '';
+  if (!driveConnected()) { PHS.state = 'nodrive'; return; }
+  if (!STATE.drive || !STATE.drive.folderId) { PHS.state = 'nofolder'; return; }
+  PHS.state = 'loading';
+  const key = PHS.key;
+  try {
+    const folderId = await driveFindSubfolder(STATE.drive.folderId, PICTURES_FOLDER_NAME);
+    if (PHS.key !== key) return;                       // user switched subject
+    if (!folderId) { PHS.state = 'ok'; return; }       // normal: first drop creates it
+    PHS.folderId = folderId;
+    const images = await phListImages(folderId);
+    if (PHS.key !== key) return;
+    PHS_SLOTS.forEach(s => {
+      const hit = images.find(f => phsMatchesSlot(f.name, s));
+      if (hit) PHS.slots[s.key] = hit;
+    });
+    PHS.others = images.filter(f => !PHS_SLOTS.some(s => phsMatchesSlot(f.name, s))).length;
+    PHS.state = 'ok';
+  } catch (e) {
+    if (PHS.key !== key) return;
+    PHS.state = 'error';
+    PHS.err = (e && e.message) || String(e);
+  }
+}
+
+/** Upload FIRST, trash superseded subject_<slot>.* AFTER — same order as phWriteSlot. */
+async function phsWriteSlot(slot, file) {
+  const folderId = await driveEnsureSubfolder(STATE.drive.folderId, PICTURES_FOLDER_NAME);
+  if (!folderId) throw new Error('Could not resolve ' + PICTURES_FOLDER_NAME + ' on Drive');
+  const name = slot.file + '.' + phExt(file);
+  const before = await phListImages(folderId);
+  const sameName = before.find(f => String(f.name).toLowerCase() === name.toLowerCase());
+  const buf = await file.arrayBuffer();
+  const res = await driveUpload(folderId, name, file.type || 'image/jpeg',
+    new Blob([buf], { type: file.type || 'image/jpeg' }), sameName ? sameName.id : '');
+  const keepId = (res && res.id) || (sameName && sameName.id) || '';
+  for (const f of before) {
+    if (f.id === keepId) continue;
+    if (!phsMatchesSlot(f.name, slot)) continue;       // deal-package files are never touched
+    try { await phTrash(f.id); PH.urls.delete(f.id); } catch (e) { /* leave it */ }
+  }
+  if (keepId) PH.urls.delete(keepId);
+  return res;
+}
+
+async function phsAccept(target, fileList) {
+  if (!target || target.kind !== 'sslot') return;
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (!files.length || !STATE) return;
+  if (!driveConnected()) {
+    toast('Connect Google Drive first — photos are stored in the deal folder');
+    return;
+  }
+  if (!STATE.drive || !STATE.drive.folderId) {
+    toast('Link this subject to its deal folder first (☰ → Find Drive Folder)');
+    return;
+  }
+  const slot = PHS_SLOTS.find(s => s.key === target.slotKey);
+  if (!slot) return;
+  const tkey = 'sslot:' + slot.key;
+  if (PHS.busy.has(tkey)) return;
+
+  const bad = files.map(phValidate).filter(Boolean);
+  const good = files.filter(f => !phValidate(f));
+  if (bad.length) toast(bad[0]);
+  if (!good.length) return;
+
+  const key = phsKey();
+  PHS.busy.add(tkey);
+  phsPaint();
+  try {
+    if (good.length > 1) toast(slot.label + ' holds one photo — using ' + good[0].name);
+    await phsWriteSlot(slot, good[0]);
+    toast('Subject ' + slot.label.toLowerCase() + ' photo saved to ' + PICTURES_FOLDER_NAME);
+    phForgetScreener('subject');
+    if (phsKey() === key) await phsLoad();
+  } catch (e) {
+    toast('Upload failed: ' + ((e && e.message) || e));
+    PHS.state = 'error';
+    PHS.err = (e && e.message) || String(e);
+  } finally {
+    PHS.busy.delete(tkey);
+    phsPaint();
+    phsLoadThumbs();
+  }
+}
+
+async function phsDelete(fileId) {
+  if (!fileId) return;
+  if (!confirm('Move this photo to the Drive bin?')) return;
+  try {
+    await phTrash(fileId);
+    PH.urls.delete(fileId);
+    toast('Photo moved to the Drive bin');
+    phForgetScreener('subject');
+    await phsLoad();
+  } catch (e) {
+    toast('Could not remove it: ' + ((e && e.message) || e));
+  }
+  phsPaint();
+}
+
+function phsSlotTileHtml(slot) {
+  const f = PHS.slots[slot.key];
+  const busy = PHS.busy.has('sslot:' + slot.key);
+  const url = f ? PH.urls.get(f.id) : null;
+  const target = { kind: 'sslot', slotKey: slot.key };
+  const inner = busy
+    ? `<div class="ph-ph">uploading…</div>`
+    : f
+      ? (url
+        ? `<img src="${esc(url)}" alt="Subject ${esc(slot.label)}" loading="lazy" />`
+        : `<div class="ph-ph">loading…</div>`)
+      : `<div class="ph-ph"><span class="ph-plus">＋</span><span>drop or tap</span></div>`;
+  return `<div class="ph-tile${f ? ' has' : ''}${busy ? ' busy' : ''}" ${phZoneAttrs(target)}>
+    <div class="ph-shot">${inner}</div>
+    <div class="ph-cap">
+      <span class="ph-name" title="${esc(f ? f.name : slot.file + '.jpg')}">${esc(slot.label)}</span>
+      ${f ? `<button class="ph-x" data-ph-del="${esc(f.id)}" title="Move to Drive bin">✕</button>` : ''}
+    </div>
+    <input type="file" class="ph-input" accept="image/*" ${phZoneAttrs(target)} hidden />
+  </div>`;
+}
+
+function phsBodyHtml() {
+  if (PHS.state === 'nodrive') {
+    return `<div class="ph-empty">Connect Google Drive to add subject photos —
+      they are stored in the deal folder, not in this browser.</div>`;
+  }
+  if (PHS.state === 'nofolder') {
+    return `<div class="ph-empty">This subject has no deal folder linked yet.
+      Use <b>Find Drive Folder</b> below, then the photo slots appear here.</div>`;
+  }
+  if (PHS.state === 'loading' || PHS.state === 'idle') {
+    return `<div class="ph-empty">Reading ${esc(PICTURES_FOLDER_NAME)}…</div>`;
+  }
+  if (PHS.state === 'error') {
+    return `<div class="ph-empty err">Could not read ${esc(PICTURES_FOLDER_NAME)}: ${esc(PHS.err)}</div>`;
+  }
+  const folderLink = PHS.folderId
+    ? `<a href="https://drive.google.com/drive/folders/${esc(PHS.folderId)}" target="_blank" rel="noopener">open ${esc(PICTURES_FOLDER_NAME)} ↗</a>`
+    : `<span>${esc(PICTURES_FOLDER_NAME)} is created on the first drop</span>`;
+  const others = PHS.others
+    ? `<span title="Deal-package images in the same folder. This card never moves or deletes them.">${PHS.others} other image${PHS.others === 1 ? '' : 's'} in the folder, left as they are</span>`
+    : '';
+  return `<div class="ph-strip">${PHS_SLOTS.map(phsSlotTileHtml).join('')}</div>
+    <div class="phs-meta">${folderLink}${others}</div>`;
+}
+
+function phsCardHtml() {
+  const have = PHS_SLOTS.filter(s => PHS.slots[s.key]).length;
+  return `<div class="card" id="phs-card">
+    <div class="card-head" title="Saved to the deal folder as 11. Pictures/subject_<slot>.<ext> — the names the Screener, the proforma photo populator and the Init UW skills all read.">
+      <span class="grow">Subject Photos</span>
+      <span class="head-stat" id="phs-stat">${PHS.state === 'ok' ? have + '/4' : ''}</span>
+      <button class="btn small" id="phs-refresh" title="Re-read 11. Pictures from Drive">↻</button>
+    </div>
+    <div class="card-body">
+      <div class="card-hint">One photo each, the four the COMPS tab's subject photo boxes hold.
+        Drag in or tap to pick; each is saved straight to <code>${esc(PICTURES_FOLDER_NAME)}/</code>
+        in the deal folder as <code>subject_&lt;slot&gt;</code>.</div>
+      <div id="phs-body">${phsBodyHtml()}</div>
+    </div>
+  </div>`;
+}
+
+function phsPaint() {
+  const card = document.getElementById('phs-card');
+  if (!card) return;
+  const body = document.getElementById('phs-body');
+  if (body) body.innerHTML = phsBodyHtml();
+  const stat = document.getElementById('phs-stat');
+  if (stat) stat.textContent = PHS.state === 'ok'
+    ? PHS_SLOTS.filter(s => PHS.slots[s.key]).length + '/4' : '';
+  phWireZones(card, { accept: phsAccept, del: phsDelete, xlsx: false });
+}
+
+async function phsLoadThumbs() {
+  const key = PHS.key;
+  for (const s of PHS_SLOTS) {
+    const f = PHS.slots[s.key];
+    if (!f || PH.urls.has(f.id)) continue;
+    if (PHS.key !== key) return;
+    try { await phObjectUrl(f); } catch (e) { continue; }
+    if (PHS.key === key && document.getElementById('phs-card')) phsPaint();
+  }
+}
+
+function phsReload() {
+  const key = phsKey();
+  PHS.state = 'loading';
+  phsPaint();
+  phsLoad().then(() => {
+    if (PHS.key !== key) return;
+    phsPaint();
+    phsLoadThumbs();
+  });
+}
+
+/** Insert the card above the Drive card on tab 1 and read (or reuse) the folder. */
+function phsMount() {
+  const host = document.getElementById('phase-content');
+  if (!host || !STATE) return;
+  if (document.getElementById('phs-card')) return;
+  const anchor = document.getElementById('p1-drive-card');
+  if (anchor) anchor.insertAdjacentHTML('beforebegin', phsCardHtml());
+  else host.insertAdjacentHTML('beforeend', phsCardHtml());
+  const card = document.getElementById('phs-card');
+  if (!card) return;
+  phGuardCardDrop(card);
+  const r = document.getElementById('phs-refresh');
+  if (r) r.onclick = (ev) => { ev.preventDefault(); phsReload(); };
+
+  const stale = PHS.key !== phsKey()
+    || PHS.state === 'idle' || PHS.state === 'error'
+    || (PHS.state === 'nodrive' && driveConnected())
+    || (PHS.state === 'nofolder' && STATE.drive && STATE.drive.folderId);
+  if (stale) {
+    /* A different subject must not flash the previous one's photos. */
+    if (PHS.key !== phsKey()) { PHS.slots = {}; PHS.others = 0; PHS.folderId = ''; }
+    phsReload();
+  } else {
+    phsPaint();
+    phsLoadThumbs();
+  }
+}
+
+(function () {
+  const inner = window.renderPhase1;
+  if (typeof inner !== 'function') {
+    console.warn('photos: renderPhase1 missing — subject photo card not mounted');
+    return;
+  }
+  window.renderPhase1 = function () {
+    inner.apply(this, arguments);
+    try { phsMount(); } catch (e) { console.error('subject photos card', e); }
+  };
+})();
+
 // -------------------------------------------------------------------- mounting
 
 /**
@@ -819,4 +1145,8 @@ window.PHOTOS = {
   load: phLoad, accept: phAccept, writeSlot: phWriteSlot,
   writePlanPhoto: phWritePlanPhoto, compFolder: phCompFolder,
   bodyHtml: phBodyHtml, cardHtml: phCardHtml, mount: phMountCompEditor,
+  // subject (tab 1)
+  SUBJECT_SLOTS: PHS_SLOTS, PHS: PHS, subjectMatchesSlot: phsMatchesSlot,
+  subjectLoad: phsLoad, subjectAccept: phsAccept, subjectWriteSlot: phsWriteSlot,
+  subjectBodyHtml: phsBodyHtml, subjectCardHtml: phsCardHtml, subjectMount: phsMount,
 };

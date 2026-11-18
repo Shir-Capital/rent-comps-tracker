@@ -3,6 +3,11 @@
    The comp-editor Photos card. Pairs with photos.js; the two files ARE the
    feature, and deleting both removes it cleanly.
 
+   Since 2026-11-18 the same rules also paint the SUBJECT photo card on tab 1
+   (#phs-card). Every selector is written `:is(#ph-card, #phs-card) …` — :is()
+   takes the specificity of its strongest argument, so both cards keep the ID
+   weight the comp card always had, and nothing outside the two cards is reached.
+
    🔴 EVERYTHING HERE IS SCOPED UNDER #ph-card, AND THAT IS NOT STYLE PEDANTRY.
    The comp EDITOR and the tab-2 LIST cards both carry `.comp-card`, and a
    `.comp-card > .card-body` rule written for the editor once collapsed every
@@ -17,7 +22,7 @@
    ========================================================================= */
 
 /* ------------------------------------------------------------ section headers */
-#ph-card .ph-sub {
+:is(#ph-card, #phs-card) .ph-sub {
   display: flex;
   align-items: baseline;
   gap: 7px;
@@ -26,15 +31,15 @@
   padding-top: 9px;
   border-top: 1px solid var(--line);
 }
-#ph-card .ph-sub:first-child { margin-top: 2px; padding-top: 0; border-top: 0; }
-#ph-card .ph-sub-t {
+:is(#ph-card, #phs-card) .ph-sub:first-child { margin-top: 2px; padding-top: 0; border-top: 0; }
+:is(#ph-card, #phs-card) .ph-sub-t {
   font-weight: 600;
   font-size: 13px;
   color: var(--ink);
   text-transform: uppercase;
   letter-spacing: .03em;
 }
-#ph-card .ph-sub-n {
+:is(#ph-card, #phs-card) .ph-sub-n {
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
@@ -43,13 +48,13 @@
   border-radius: 9px;
   padding: 0 6px;
 }
-#ph-card .ph-sub-h {
+:is(#ph-card, #phs-card) .ph-sub-h {
   flex: 1 1 100%;
   font-size: 11.5px;
   color: var(--muted);
   line-height: 1.35;
 }
-#ph-card .ph-sub-h code {
+:is(#ph-card, #phs-card) .ph-sub-h code {
   font-size: 11px;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -60,13 +65,13 @@
 /* ------------------------------------------------------------------- the tiles */
 /* A single row of four on a phone would be 90px each and useless, so the strip
    wraps two-up and the ≥900px block takes it to four. */
-#ph-card .ph-strip {
+:is(#ph-card, #phs-card) .ph-strip {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-#ph-card .ph-tile {
+:is(#ph-card, #phs-card) .ph-tile {
   position: relative;
   border: 1.5px dashed var(--line);
   border-radius: 8px;
@@ -76,20 +81,20 @@
   transition: border-color .12s, background .12s;
   -webkit-tap-highlight-color: transparent;
 }
-#ph-card .ph-tile.has { border-style: solid; background: var(--card); }
-#ph-card .ph-tile:hover { border-color: var(--direct); }
+:is(#ph-card, #phs-card) .ph-tile.has { border-style: solid; background: var(--card); }
+:is(#ph-card, #phs-card) .ph-tile:hover { border-color: var(--direct); }
 
 /* The drag state has to be unmistakable — a dashed grey border going slightly
    less grey is not feedback. */
-#ph-card .ph-tile.over {
+:is(#ph-card, #phs-card) .ph-tile.over {
   border-color: var(--direct);
   border-style: solid;
   background: #eff6ff;
   box-shadow: inset 0 0 0 2px var(--direct);
 }
-#ph-card .ph-tile.busy { cursor: progress; opacity: .72; }
+:is(#ph-card, #phs-card) .ph-tile.busy { cursor: progress; opacity: .72; }
 
-#ph-card .ph-shot {
+:is(#ph-card, #phs-card) .ph-shot {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -99,15 +104,15 @@
   min-height: 92px;
   background: #eef1f5;
 }
-#ph-card .ph-tile.small .ph-shot { min-height: 78px; }
-#ph-card .ph-shot img {
+:is(#ph-card, #phs-card) .ph-tile.small .ph-shot { min-height: 78px; }
+:is(#ph-card, #phs-card) .ph-shot img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   display: block;
 }
 
-#ph-card .ph-ph {
+:is(#ph-card, #phs-card) .ph-ph {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -119,9 +124,9 @@
   padding: 4px;
   line-height: 1.3;
 }
-#ph-card .ph-plus { font-size: 19px; line-height: 1; color: var(--direct); }
+:is(#ph-card, #phs-card) .ph-plus { font-size: 19px; line-height: 1; color: var(--direct); }
 
-#ph-card .ph-cap {
+:is(#ph-card, #phs-card) .ph-cap {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -130,7 +135,7 @@
   border-top: 1px solid var(--line);
   background: var(--card);
 }
-#ph-card .ph-name {
+:is(#ph-card, #phs-card) .ph-name {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 11.5px;
@@ -143,7 +148,7 @@
 
 /* 38px of tappable area from a 20px glyph, via padding rather than a bigger ✕ —
    the same trick the unit-mix row actions use. */
-#ph-card .ph-x {
+:is(#ph-card, #phs-card) .ph-x {
   flex: 0 0 auto;
   border: 0;
   background: transparent;
@@ -155,17 +160,17 @@
   cursor: pointer;
   border-radius: 5px;
 }
-#ph-card .ph-x:hover { color: var(--err); background: var(--err-bg); }
+:is(#ph-card, #phs-card) .ph-x:hover { color: var(--err); background: var(--err-bg); }
 
 /* ------------------------------------------------------------- plan galleries */
-#ph-card .ph-plan {
+:is(#ph-card, #phs-card) .ph-plan {
   border: 1px solid var(--line);
   border-radius: 8px;
   margin-bottom: 8px;
   background: var(--card);
   overflow: hidden;
 }
-#ph-card .ph-plan-head {
+:is(#ph-card, #phs-card) .ph-plan-head {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -178,9 +183,9 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
-#ph-card .ph-plan-head::-webkit-scrollbar { display: none; }
-#ph-card .ph-plan-name { font-weight: 600; font-size: 12.5px; color: var(--ink); }
-#ph-card .ph-count {
+:is(#ph-card, #phs-card) .ph-plan-head::-webkit-scrollbar { display: none; }
+:is(#ph-card, #phs-card) .ph-plan-name { font-weight: 600; font-size: 12.5px; color: var(--ink); }
+:is(#ph-card, #phs-card) .ph-count {
   font-size: 10.5px;
   font-weight: 600;
   color: var(--muted);
@@ -189,13 +194,13 @@
   border-radius: 9px;
   padding: 0 6px;
 }
-#ph-card .ph-path {
+:is(#ph-card, #phs-card) .ph-path {
   margin-left: auto;
   font-size: 10.5px;
   color: var(--muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-#ph-card .ph-warn {
+:is(#ph-card, #phs-card) .ph-warn {
   font-size: 10.5px;
   font-weight: 600;
   color: var(--warn);
@@ -204,7 +209,7 @@
   padding: 1px 6px;
 }
 
-#ph-card .ph-plan-body {
+:is(#ph-card, #phs-card) .ph-plan-body {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 7px;
@@ -212,7 +217,7 @@
 }
 
 /* ------------------------------------------------------------ empty / error */
-#ph-card .ph-empty {
+:is(#ph-card, #phs-card) .ph-empty {
   font-size: 12px;
   color: var(--muted);
   background: var(--bg);
@@ -221,13 +226,13 @@
   padding: 11px 12px;
   line-height: 1.45;
 }
-#ph-card .ph-empty.err {
+:is(#ph-card, #phs-card) .ph-empty.err {
   color: var(--err);
   background: var(--err-bg);
   border-color: #fca5a5;
   border-style: solid;
 }
-#ph-card .ph-empty code {
+:is(#ph-card, #phs-card) .ph-empty code {
   font-size: 11px;
   background: var(--card);
   border: 1px solid var(--line);
@@ -239,14 +244,21 @@
 @media (min-width: 900px) {
   /* Four across, matching the Screener's photo strip so the two screens read as
      the same set of pictures. */
-  #ph-card .ph-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  :is(#ph-card, #phs-card) .ph-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 
   /* auto-fill, not a fixed count: a plan with two photos should not leave four
      empty tracks, and one with nine should not force a horizontal scroll. */
-  #ph-card .ph-plan-body {
+  :is(#ph-card, #phs-card) .ph-plan-body {
     grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
     gap: 8px;
   }
-  #ph-card .ph-tile.small .ph-shot { min-height: 88px; }
-  #ph-card .ph-sub-h { flex: 1 1 auto; text-align: right; }
+  :is(#ph-card, #phs-card) .ph-tile.small .ph-shot { min-height: 88px; }
+  :is(#ph-card, #phs-card) .ph-sub-h { flex: 1 1 auto; text-align: right; }
 }
+
+/* ------------------------------------------------- subject card (tab 1) only */
+#phs-card .phs-meta {
+  display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+  margin-top: 8px; font-size: 12px; color: var(--muted);
+}
+#phs-card .phs-meta a { color: var(--direct); }
