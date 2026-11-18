@@ -1,0 +1,143 @@
+/* provenance.css — source ticks and the hover card (provenance.js).
+ *
+ * The cue is a corner tick, the same idea as a cell comment in Excel: present
+ * only where a record exists, coloured by kind, never moving the layout.
+ *   green  looked up, with a time
+ *   amber  looked up, but no lookup time was recorded
+ *   blue   computed by a script (column G, scores)
+ *   red    the run's value differs from what the tracker holds now
+ *   grey   edited in the tracker after the import
+ */
+
+:root {
+  --pv-ok: #16a34a;
+  --pv-untimed: #d97706;
+  --pv-computed: #2563eb;
+  --pv-differs: #dc2626;
+  --pv-edited: #94a3b8;
+}
+
+.pv-on { position: relative; }
+
+.pv-tick {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 14px;
+  height: 14px;
+  cursor: help;
+  z-index: 2;
+}
+/* The visible triangle is 7px; the 14px box is the tap target. */
+.pv-tick::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-style: solid;
+  border-width: 0 7px 7px 0;
+  border-color: transparent var(--pv-ok) transparent transparent;
+}
+.pv-on[data-pvkind="untimed"]  > .pv-tick::after { border-right-color: var(--pv-untimed); }
+.pv-on[data-pvkind="computed"] > .pv-tick::after { border-right-color: var(--pv-computed); }
+.pv-on[data-pvkind="differs"]  > .pv-tick::after { border-right-color: var(--pv-differs); }
+.pv-on[data-pvkind="edited"]   > .pv-tick::after { border-right-color: var(--pv-edited); }
+.pv-tick:focus-visible { outline: 2px solid var(--navy-2); outline-offset: 1px; }
+
+/* Grid labels have no box of their own; give the tick room beside the text. */
+.tri-grid > .lbl.pv-on { padding-right: 12px; }
+/* Phones: a bigger target. */
+@media (pointer: coarse) {
+  .pv-tick { width: 22px; height: 22px; }
+  .pv-tick::after { border-width: 0 9px 9px 0; }
+}
+
+/* Comp score chip in a comp card head. */
+.pv-score {
+  display: inline-block;
+  margin: 0 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  color: var(--pv-computed);
+  background: #dbeafe;
+  cursor: help;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- the card */
+#pv-pop {
+  position: fixed;
+  z-index: 1000;
+  display: none;
+  max-height: min(70vh, 460px);
+  overflow: auto;
+  padding: 8px 10px 9px;
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+#pv-pop.show { display: block; }
+
+#pv-pop .pv-h { margin-bottom: 6px; }
+#pv-pop .pv-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--pv-ok);
+}
+#pv-pop .pv-untimed  .pv-chip { background: var(--pv-untimed); }
+#pv-pop .pv-computed .pv-chip { background: var(--pv-computed); }
+#pv-pop .pv-differs  .pv-chip { background: var(--pv-differs); }
+#pv-pop .pv-edited   .pv-chip { background: #64748b; }
+
+#pv-pop .pv-r {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 6px;
+  padding: 2px 0;
+}
+#pv-pop .pv-k { color: var(--muted); }
+#pv-pop .pv-v { overflow-wrap: anywhere; }
+#pv-pop .pv-ago { color: var(--muted); font-size: 11.5px; margin-left: 4px; }
+#pv-pop .pv-warn { color: var(--warn); font-weight: 600; }
+#pv-pop .pv-warnrow .pv-v { color: var(--warn); }
+#pv-pop a { color: var(--navy-2); text-decoration: underline; }
+#pv-pop .pv-sep {
+  margin: 7px 0 3px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#pv-pop .pv-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 1px 0;
+}
+#pv-pop .pv-line > span:last-child { color: var(--muted); text-align: right; }
+#pv-pop .pv-note { color: var(--muted); }
+#pv-pop .pv-foot {
+  margin-top: 7px;
+  padding-top: 5px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+/* Import preview: the extra group's file line. */
+.pv-grp-note { margin: 2px 0 4px 24px; overflow-wrap: anywhere; }

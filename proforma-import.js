@@ -1338,8 +1338,12 @@ function pfPreviewHtml() {
       <span class="v">${c.unitMix.length} plan${c.unitMix.length === 1 ? '' : 's'}</span>
     </div>`).join('');
 
+  /* PF.sel holds what was ticked when "Apply" asked for the replace
+     confirmation. Without it this re-render re-ticked every group, so a user who
+     unticked Comps and then pressed "Yes, replace" lost their comps anyway. */
+  const on = id => !PF.sel || !Object.prototype.hasOwnProperty.call(PF.sel, id) || PF.sel[id];
   const grp = (id, label, count, danger) => `<label class="pf-grp${count ? '' : ' off'}">
-    <input type="checkbox" id="${id}"${count ? ' checked' : ' disabled'}/>
+    <input type="checkbox" id="${id}"${count ? (on(id) ? ' checked' : '') : ' disabled'}/>
     <span>${esc(label)} <b>${count}</b>${danger ? ` <span class="pf-danger">${esc(danger)}</span>` : ''}</span>
   </label>`;
 
@@ -1396,8 +1400,8 @@ function pfWire() {
   on('btn-pf-start', pfStart);
   on('btn-pf-read', pfRead);
   on('btn-pf-apply', pfApply);
-  on('btn-pf-back', () => { PF.step = 'list'; PF.parsed = null; PF.confirmReplace = ''; pfRerender(); });
-  on('btn-pf-keep', () => { PF.confirmReplace = ''; pfRerender(); });
+  on('btn-pf-back', () => { PF.step = 'list'; PF.parsed = null; PF.confirmReplace = ''; PF.sel = null; pfRerender(); });
+  on('btn-pf-keep', () => { PF.confirmReplace = ''; PF.sel = null; pfRerender(); });
   on('btn-pf-cancel', () => { pfResetImport(); pfRerender(); });
   on('btn-pf-reset', () => { pfResetImport(); pfRerender(); });
   $$('#pf-card input[name="pf-file"]').forEach(r => {
@@ -1492,6 +1496,8 @@ function pfApply() {
   if (doComps && (STATE.comps || []).length) lost.push(STATE.comps.length + ' captured comp(s)');
   if (lost.length && !PF.confirmReplace) {
     PF.confirmReplace = 'This replaces ' + lost.join(' and ') + '.';
+    PF.sel = {};
+    $$('#pf-card .pf-grps input[type=checkbox]').forEach(el => { PF.sel[el.id] = el.checked; });
     pfRerender();
     return;
   }
