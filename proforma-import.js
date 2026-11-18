@@ -444,7 +444,16 @@ function pfRRBlock(ws, first, lastBound, cols, sections) {
  */
 function pfReadRR(ws) {
   const { maxRow, maxCol } = pfRange(ws);
-  const scanTo = Math.min(maxRow, 1000);
+  /* No fixed row ceiling. The blocks are bounded by their own terminal labels
+     (PF_RR_TERMINAL), not by a row number — and the row numbers move between
+     template generations. v7/v8: occupied 6-350, VACANTS 401-750, lease table
+     ~800. v59/v60: occupied 6-715, VACANTS banner at ROW 1000, its block to
+     1705, lease table at 2000. The old `Math.min(maxRow, 1000)` found that
+     banner on its last row and read an empty vacant block, so every v59+ deal
+     imported occupied units only (Sundance 125 of 176, Copper Mill 222 of 344).
+     The cap below only guards against a runaway used-range, and sits well past
+     the lease table, which the `Unit Type Name` terminal already stops at. */
+  const scanTo = Math.min(maxRow, 6000);
 
   let hdr = 0;
   for (let r = 1; r <= Math.min(30, maxRow) && !hdr; r++) {
