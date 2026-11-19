@@ -130,9 +130,45 @@ function wireHomeDelegation() {
     }
     // ⤓ Update All Subjects — pulls every subject's saved data, not just the index.
     if (ev.target.closest('#btn-home-pull-all')) { pullAllFromDrive(); return; }
-    // Live ⇄ Archived view toggle.
-    if (ev.target.closest('#btn-home-archived')) { HOME_VIEW_MODE = 'archived'; renderHome(); return; }
-    if (ev.target.closest('#btn-home-live'))     { HOME_VIEW_MODE = 'live';     renderHome(); return; }
+    // Bulk select. The checkbox sits INSIDE the clickable card, so this has to
+    // run before the open handlers below or a tick would also open the subject.
+    const pick = ev.target.closest('.pick');
+    if (pick) {
+      const box = pick.querySelector('input[type="checkbox"]');
+      if (!box) return;
+      if (ev.target !== box) return;          // label click: the browser re-fires on the box
+      if (box.id === 'bulk-all') {
+        const ids = Array.from(host.querySelectorAll('[data-pick]')).map(b => b.getAttribute('data-pick'));
+        if (box.checked) ids.forEach(id => HOME_SELECTED.add(id));
+        else HOME_SELECTED.clear();
+      } else {
+        const id = box.getAttribute('data-pick');
+        if (box.checked) HOME_SELECTED.add(id); else HOME_SELECTED.delete(id);
+      }
+      renderHome();
+      return;
+    }
+    if (ev.target.closest('#bulk-clear')) { HOME_SELECTED.clear(); renderHome(); return; }
+    if (ev.target.closest('#bulk-go')) {
+      const items = homeSelectedItems();
+      if (!items.length) return;
+      const to = HOME_VIEW_MODE !== 'archived';
+      const names = items.map(x => (x.p && x.p.name) || (x.entry && x.entry.name) || x.id);
+      const list = names.slice(0, 12).map(n => '  • ' + n).join('\n')
+        + (names.length > 12 ? '\n  … and ' + (names.length - 12) + ' more' : '');
+      if (!confirm((to ? 'Archive ' : 'Restore ') + items.length + ' subject' + (items.length === 1 ? '' : 's') + '?\n\n'
+        + list + '\n\n'
+        + (to ? 'They move off the main list into 🗄 Archived, for everyone. Nothing is deleted '
+              + '— on Drive or on this device — and you can restore them any time.'
+              : 'They move back onto the main list, for everyone.'))) return;
+      setPropertiesArchived(items, to);
+      HOME_SELECTED.clear();
+      renderHome();
+      return;
+    }
+    // Live ⇄ Archived view toggle. A selection never carries across.
+    if (ev.target.closest('#btn-home-archived')) { HOME_SELECTED.clear(); HOME_VIEW_MODE = 'archived'; renderHome(); return; }
+    if (ev.target.closest('#btn-home-live'))     { HOME_SELECTED.clear(); HOME_VIEW_MODE = 'live';     renderHome(); return; }
     if (ev.target.closest('#btn-home-sort-dir')) {
       setHomeSort(HOME_SORT_FIELD, HOME_SORT_DIR === 'asc' ? 'desc' : 'asc');
       return;

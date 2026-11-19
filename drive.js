@@ -965,19 +965,32 @@ async function removeManifestEntry(id) {
  * always writing is one small JSON PUT.
  */
 async function setManifestArchived(p, archived) {
-  if (!p || !p.id || !driveConnected()) return;
-  const hasFolder = !!(p.drive && p.drive.folderId);
+  return setManifestArchivedMany([p], archived);
+}
+/**
+ * The same, for several subjects in ONE read-modify-write (bulk archive,
+ * 2026-11-19). Calling setManifestArchived once per subject would run N
+ * concurrent fetch-then-PUTs against one file, and every write but the last
+ * would be lost. `ps` may mix local records and bare index rows ({id, name}) —
+ * a row already in the index needs only its id.
+ */
+async function setManifestArchivedMany(ps, archived) {
+  ps = (ps || []).filter(p => p && p.id);
+  if (!ps.length || !driveConnected()) return;
+  const hasFolder = ps.some(p => p.drive && p.drive.folderId);
   try {
     const m = await fetchManifest(true);
     if (!m) return;
-    const i = m.data.properties.findIndex(x => x.id === p.id);
-    if (i >= 0) {
-      m.data.properties[i].archived = !!archived;
-    } else if (hasFolder) {
-      m.data.properties.push(Object.assign(manifestEntryFor(p), { archived: !!archived }));
-    } else {
-      return;
-    }
+    let changed = 0;
+    ps.forEach(p => {
+      const i = m.data.properties.findIndex(x => x.id === p.id);
+      if (i >= 0) {
+        m.data.properties[i].archived = !!archived; changed++;
+      } else if (p.drive && p.drive.folderId) {
+        m.data.properties.push(Object.assign(manifestEntryFor(p), { archived: !!archived })); changed++;
+      }
+    });
+    if (!changed) return;
     m.data.updatedAt = nowISO();
     const r = await driveUploadJson(SYNC_FOLDER_ID, MANIFEST_FILENAME, m.data, m.fileId || undefined);
     m.fileId = r.id;
@@ -1003,6 +1016,32 @@ function setPropertyArchived(p, archived) {
   }
   setManifestArchived(p, archived);             // async → org-wide
   toast(archived ? `Archived “${p.name || 'subject'}”` : `Restored “${p.name || 'subject'}” to Live`);
+}
+
+/**
+ * Bulk archive / restore from the home list. `items` = [{id, p, entry}] where p
+ * is the local record (may be null for a subject only on Drive) and entry its
+ * index row. Local flags and the cached index flip at once; the shared index
+ * gets ONE write for the lot.
+ */
+function setPropertiesArchived(items, archived) {
+  const targets = [];
+  let touchedLocal = false;
+  (items || []).forEach(({ id, p, entry }) => {
+    if (!id) return;
+    if (p) { p.archived = !!archived; touchedLocal = true; }
+    if (MANIFEST_CACHE && MANIFEST_CACHE.data && Array.isArray(MANIFEST_CACHE.data.properties)) {
+      const e = MANIFEST_CACHE.data.properties.find(x => x.id === id);
+      if (e) e.archived = !!archived;
+    }
+    targets.push(p || entry || { id });
+  });
+  if (touchedLocal) {
+    if (STATE && targets.some(t => t.id === STATE.id)) saveState(); else saveStore();
+  }
+  setManifestArchivedMany(targets, archived);    // async → org-wide, one PUT
+  const n = targets.length;
+  toast((archived ? 'Archived ' : 'Restored ') + n + ' subject' + (n === 1 ? '' : 's') + (archived ? '' : ' to Live'));
 }
 
 async function releaseEditorLock() {

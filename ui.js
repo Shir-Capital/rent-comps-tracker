@@ -602,6 +602,40 @@ let HOME_VIEW_MODE  = 'live';                                                  /
    so its open state has to live out here or the panel slams shut the moment the
    index refresh lands a second after you open it. */
 let HOME_LEGEND_OPEN = false;
+/* Bulk archive / restore (2026-11-19): the ids ticked on the home list. Lives
+   out here for the same reason as the legend state — renderHome rebuilds the
+   list on every index refresh. Cleared when the Live / Archived view flips. */
+const HOME_SELECTED = new Set();
+
+/** The ticked rows still on screen, as {p: local record|null, entry: index row|null}. */
+function homeSelectedItems() {
+  const idx = (MANIFEST_CACHE && MANIFEST_CACHE.data && MANIFEST_CACHE.data.properties) || [];
+  return mergedHomeEntries()
+    .filter(e => HOME_VIEW_MODE === 'archived' ? isEntryArchived(e) : !isEntryArchived(e))
+    .map(e => {
+      const id = e.local ? e.local.id : (e.remote && e.remote.id);
+      return { id, p: e.local || null, entry: e.remote || idx.find(x => x.id === id) || null };
+    })
+    .filter(x => x.id && HOME_SELECTED.has(x.id));
+}
+function homePickBox(id, name) {
+  return `<label class="pick" title="Select for bulk ${HOME_VIEW_MODE === 'archived' ? 'restore' : 'archive'}">
+    <input type="checkbox" data-pick="${esc(id)}"${HOME_SELECTED.has(id) ? ' checked' : ''}
+      aria-label="Select ${esc(name || 'subject')}" /></label>`;
+}
+function homeBulkBarHtml(visibleIds) {
+  const n = visibleIds.filter(id => HOME_SELECTED.has(id)).length;
+  if (!visibleIds.length) return '';
+  const all = n === visibleIds.length;
+  const verb = HOME_VIEW_MODE === 'archived' ? '↩ Restore' : '🗄 Archive';
+  return `<div class="bulk-bar${n ? ' on' : ''}">
+    <label class="pick"><input type="checkbox" id="bulk-all"${all ? ' checked' : ''}
+      aria-label="Select all" /></label>
+    <span class="bulk-n">${n ? n + ' selected' : 'Select all'}</span>
+    ${n ? `<button class="btn small" id="bulk-clear">Clear</button>
+      <button class="btn small bulk-go" id="bulk-go">${verb} ${n}</button>` : ''}
+  </div>`;
+}
 
 function setHomeSort(field, dir) {
   HOME_SORT_FIELD = field;
@@ -812,7 +846,8 @@ function renderHome() {
       return n;
     })();
     const direct = (p.comps || []).filter(c => c.category === 'direct').length;
-    return `<div class="prop-card" data-open="${esc(p.id)}">
+    return `<div class="prop-card${HOME_SELECTED.has(p.id) ? ' picked' : ''}" data-open="${esc(p.id)}">
+      ${homePickBox(p.id, p.name)}
       <div class="grow">
         <div class="pname">${esc(p.name)}</div>
         <div class="psub">${esc(p.drive.folderName || 'no Drive folder linked')} · edited ${esc(relTime(p.updated))}</div>
@@ -829,7 +864,8 @@ function renderHome() {
   }).join('');
 
   const remoteCards = remoteOnly.map(e => `
-    <div class="prop-card" data-openremote="${esc(e.id)}">
+    <div class="prop-card${HOME_SELECTED.has(e.id) ? ' picked' : ''}" data-openremote="${esc(e.id)}">
+      ${homePickBox(e.id, e.name)}
       <div class="grow">
         <div class="pname">☁ ${esc(e.name)}</div>
         <div class="psub">${esc(e.dealFolderName || '')} · ${esc(e.lastEditor || '')} · ${esc(relTime(e.lastModified))}</div>
@@ -846,7 +882,12 @@ function renderHome() {
     ? 'No archived subjects. Open one and use ☰ → Archive to move it here.'
     : 'No subjects on this device yet. Tap “+ New Subject” to start.';
 
+  // Drop ticks for rows no longer on this list (archived elsewhere, deleted…).
+  const visibleIds = local.map(p => p.id).concat(remoteOnly.map(e => e.id));
+  Array.from(HOME_SELECTED).forEach(id => { if (visibleIds.indexOf(id) === -1) HOME_SELECTED.delete(id); });
+
   host.innerHTML = onboard + header
+    + homeBulkBarHtml(visibleIds)
     + (cards || (remoteCards ? '' : `<div class="muted small" style="padding:8px 2px">${empty}</div>`))
     + (remoteCards ? `<div class="section-title">On Drive (other devices)</div>` + remoteCards : '')
     /* The FAB stays: on a phone the header scrolls away, and this is the only
