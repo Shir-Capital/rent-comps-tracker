@@ -13,23 +13,25 @@
 .screener .sc-side.left { border-right: 2px solid #cbd5e1; }
 
 /* ---------------------------------------------------------------- band 1 */
+/* Compacted 2026-11-19 (about 56px -> 36px): chip label and count on one line,
+   each figure's value and note on one line under its label. */
 .sc-band1 {
   background: var(--card); border-bottom: 1px solid var(--line);
-  display: flex; align-items: stretch; gap: 12px; padding: 8px 10px;
+  display: flex; align-items: center; gap: 10px; padding: 4px 10px;
 }
 .sc-b1lab {
-  font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
-  font-weight: 600; align-self: center; line-height: 1.2; white-space: nowrap;
+  font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
+  font-weight: 600; align-self: center; line-height: 1.1; white-space: nowrap;
 }
-.sc-rail { display: flex; gap: 6px; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
+.sc-rail { display: flex; gap: 5px; flex: 1 1 auto; min-width: 0; flex-wrap: wrap; }
 .sc-bkt {
-  border: 1px solid var(--line); background: #fff; border-radius: 6px; cursor: pointer;
-  padding: 5px 10px 6px; text-align: left; min-width: 92px; line-height: 1.2;
-  display: flex; flex-direction: column; gap: 2px; font-family: inherit;
+  border: 1px solid var(--line); background: #fff; border-radius: 5px; cursor: pointer;
+  padding: 3px 9px; text-align: left; line-height: 1.15;
+  display: flex; flex-direction: row; align-items: baseline; gap: 6px; font-family: inherit;
 }
 .sc-bkt:hover:not(:disabled) { border-color: #94a3b8; background: #fbfcfe; }
-.sc-bkt .k { font-size: 17px; font-weight: 700; color: var(--ink); }
-.sc-bkt .m { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.sc-bkt .k { font-size: 15px; font-weight: 700; color: var(--ink); }
+.sc-bkt .m { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .sc-bkt.active { background: var(--navy); border-color: var(--navy); }
 .sc-bkt.active .k, .sc-bkt.active .m { color: #fff; }
 .sc-bkt.active .m { opacity: .82; }
@@ -40,19 +42,20 @@
   flex: 0 0 auto; border-left: 1px solid var(--line); padding-left: 12px;
   display: flex; align-items: center; gap: 12px;
 }
-.sc-fig { line-height: 1.15; }
+.sc-fig { line-height: 1.1; }
 .sc-fig .lab {
-  font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase;
+  font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase;
   color: var(--muted); font-weight: 600;
 }
-.sc-fig .val { font-size: 21px; font-weight: 700; }
+.sc-fig .vl { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.sc-fig .val { font-size: 17px; font-weight: 700; }
 .sc-fig .val.up { color: var(--ok); }
 .sc-fig .val.dn { color: var(--err); }
-.sc-fig .sub { font-size: 11.5px; color: var(--muted); }
+.sc-fig .sub { font-size: 11px; color: var(--muted); }
 .sc-fig .sub.warn { color: var(--warn); font-weight: 600; }
 .sc-apply {
   border: 1px solid #b6c4de; background: var(--shir-blue); color: var(--shir-ink);
-  font: 600 12.5px/1 inherit; padding: 8px 9px; border-radius: 5px; cursor: pointer;
+  font: 600 12px/1 inherit; padding: 6px 8px; border-radius: 5px; cursor: pointer;
   white-space: nowrap; align-self: center;
 }
 .sc-apply:hover:not(:disabled) { background: #c9d5ec; }
@@ -60,15 +63,16 @@
 
 /* ---------------------------------------------------------------- band 2 */
 .sc-band2 { border-bottom: 2px solid #cbd5e1; }
-.sc-head { padding: 7px 11px 6px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
+/* Name and facts share one line (2026-11-19); facts give way first. */
+.sc-head { padding: 4px 11px; border-bottom: 1px solid var(--line); flex: 0 0 auto; }
 .sc-htop { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .sc-name {
-  font-size: 19px; font-weight: 700; white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; min-width: 0;
+  font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; min-width: 0; flex: 0 1 auto;
 }
 .sc-facts {
-  font-size: 12.5px; color: var(--muted); margin-top: 1px;
-  display: flex; gap: 9px; flex-wrap: wrap;
+  font-size: 12px; color: var(--muted); min-width: 0; flex: 1 1 auto;
+  display: flex; gap: 8px; flex-wrap: nowrap; overflow: hidden; white-space: nowrap;
 }
 .sc-facts .flag { color: var(--warn); font-weight: 600; }
 .sc-tag {
@@ -83,7 +87,7 @@
 
 .sc-cyc { display: flex; align-items: center; gap: 4px; margin-left: auto; flex: 0 0 auto; }
 .sc-cyc button {
-  width: 27px; height: 27px; border: 1px solid var(--line); background: #fff;
+  width: 24px; height: 24px; border: 1px solid var(--line); background: #fff;
   border-radius: 5px; cursor: pointer; font-size: 14px; color: var(--ink);
   display: grid; place-items: center; font-family: inherit;
 }
@@ -101,20 +105,20 @@
 
 .sc-body { flex: 1 1 auto; overflow-y: auto; }
 /* Nine rows visible, scroll for the rest — the same count a COMPS section holds.
-   9 * 27px + 24px sticky header. */
-.sc-scroll9 { max-height: 267px; }
+   9 * 22px + 20px sticky header (was 27px rows, 267px, before 2026-11-19). */
+.sc-scroll9 { max-height: 218px; }
 
-table.sc-mix { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.sc-mix { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.sc-mix th {
   position: sticky; top: 0; background: #f8fafc; z-index: 2;
-  font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase;
-  color: var(--muted); font-weight: 700; text-align: right; padding: 4px 8px;
+  font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; text-align: right; padding: 3px 8px;
   border-bottom: 1px solid var(--line); white-space: nowrap;
 }
 table.sc-mix th.l, table.sc-mix td.l { text-align: left; }
 table.sc-mix td {
-  padding: 3px 8px; text-align: right; border-bottom: 1px solid #f1f5f9;
-  white-space: nowrap; height: 27px;
+  padding: 1px 8px; text-align: right; border-bottom: 1px solid #f1f5f9;
+  white-space: nowrap; height: 22px;
 }
 table.sc-mix tbody tr.anchor { background: #eef4ff; }
 table.sc-mix tbody tr.anchor td { border-bottom-color: #c9dcff; }
@@ -149,28 +153,40 @@ table.sc-mix .psf { color: var(--muted); font-size: 12.5px; }
    seed = came from the proforma and nobody has confirmed it -> grey
    user = typed here -> SHIR ink, the app's "you own this cell" colour
    none = no value anywhere -> red, because an unpriced plan is an error */
-.sc-mrent {
-  width: 68px; font: 700 13px/1 inherit; text-align: right; padding: 3px 5px;
+/* `.screener input.sc-mrent`, not `.sc-mrent`: styles.css's global
+   `input[type="number"]` (0,1,1) outranked the bare class (0,1,0), so until
+   2026-11-19 this input rendered full-width and 38px tall, which made every
+   subject plan row 38px. The old `font: ... inherit` shorthand was also invalid
+   (inherit cannot sit inside a shorthand) and was dropped whole. */
+.sc-mrent, .screener input.sc-mrent {
+  width: 68px; min-height: 0; height: 19px; font-family: inherit; font-size: 12.5px;
+  font-weight: 700; line-height: 1; text-align: right; padding: 1px 5px;
   border: 1px solid #b6c4de; border-radius: 4px;
   background: var(--shir-blue); color: var(--shir-ink);
 }
-.sc-mrent.seed { color: #94a3b8; font-weight: 600; }
-.sc-mrent.user { color: var(--shir-ink); }
-.sc-mrent.none { background: var(--err-bg); border-color: #f87171; }
+.screener .sc-mrent.seed { color: #94a3b8; font-weight: 600; }
+.screener .sc-mrent.user { color: var(--shir-ink); }
+.screener .sc-mrent.none { background: var(--err-bg); border-color: #f87171; }
 .sc-mrent.none::placeholder { color: var(--err); opacity: 1; }
 .sc-mrent.sample { width: 34px; height: 17px; padding: 0; vertical-align: middle; }
 
 .sc-foot {
   flex: 0 0 auto; border-top: 1px solid var(--line); background: #fbfcfe;
-  padding: 5px 11px; display: flex; gap: 14px; align-items: baseline;
+  padding: 3px 11px; display: flex; gap: 14px; align-items: baseline;
   font-size: 12.5px; flex-wrap: wrap;
 }
+/* The market-rent colour key lives with the inputs it explains. */
+.sc-mlg {
+  margin-left: auto; display: flex; gap: 10px; font-size: 11px; color: var(--muted);
+  align-self: center;
+}
+.sc-mlg i { font-style: normal; display: inline-flex; align-items: center; gap: 4px; }
 .sc-foot .kv { display: flex; gap: 5px; align-items: baseline; }
 .sc-foot .kv .k {
   color: var(--muted); font-size: 11px; letter-spacing: .06em;
   text-transform: uppercase; font-weight: 600;
 }
-.sc-foot .kv .v { font-weight: 700; font-size: 15px; }
+.sc-foot .kv .v { font-weight: 700; font-size: 14px; }
 .sc-foot .kv .k.warn, .sc-foot .kv .v.warn { color: var(--warn); }
 .sc-foot .kv .v.up { color: var(--ok); }
 .sc-foot .kv .v.dn { color: var(--err); }
@@ -183,7 +199,10 @@ table.sc-mix .psf { color: var(--muted); font-size: 12.5px; }
 
 /* ---------------------------------------------------------------- band 3 */
 .sc-band3 { border-bottom: 2px solid #cbd5e1; }
-.sc-attrs { padding: 8px 11px 10px; display: flex; gap: 9px; align-items: flex-start; }
+.sc-attrs { padding: 6px 11px 8px; display: flex; gap: 9px; align-items: flex-start; }
+/* Key attributes: one panel, two columns, a hairline between them. */
+.sc-prim .sc-pcols { display: grid; grid-template-columns: 1fr 1fr; }
+.sc-prim .sc-pcols > table + table { border-left: 1px solid var(--line); }
 .sc-panel { flex: 1 1 0; min-width: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .sc-panel > h4 {
   margin: 0; padding: 3px 7px; background: #f8fafc; border-bottom: 1px solid var(--line);
@@ -227,7 +246,8 @@ table.sc-arow tr:hover td { background: #fafbfd; }
 .sc-fee.zero { color: #cbd5e1; font-weight: 400; }
 
 /* ---------------------------------------------------------------- band 4 */
-.sc-photos { padding: 8px 11px 10px; }
+.sc-band4 { border-bottom: 2px solid #cbd5e1; }
+.sc-photos { padding: 6px 11px 8px; }
 .sc-phead {
   font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase;
   color: var(--muted); font-weight: 700; margin-bottom: 5px;
@@ -236,7 +256,7 @@ table.sc-arow tr:hover td { background: #fafbfd; }
 .sc-phead .cov { text-transform: none; letter-spacing: .02em; font-weight: 600; }
 .sc-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .sc-shot { border: 1px solid var(--line); border-radius: 5px; overflow: hidden; background: #f8fafc; }
-.sc-shot img { display: block; width: 100%; aspect-ratio: 300 / 220; object-fit: cover; }
+.sc-shot img { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: cover; }
 .sc-shot .cap {
   font-size: 10px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted);
   font-weight: 700; padding: 2px 6px; background: #fff; border-top: 1px solid var(--line);
@@ -247,15 +267,25 @@ table.sc-arow tr:hover td { background: #fafbfd; }
   background: repeating-linear-gradient(45deg, #fbfcfe, #fbfcfe 6px, #f4f7fa 6px, #f4f7fa 12px);
 }
 .sc-shot.none .ph {
-  aspect-ratio: 300 / 220; display: grid; place-items: center; color: #b6c2d2;
+  aspect-ratio: 3 / 2; display: grid; place-items: center; color: #b6c2d2;
   font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
 }
 
+/* The attributes section's header bar: title, the Y / N / · key, and the
+   show/hide switch for the non-key fields. Sits ABOVE the section it explains. */
 .sc-legend {
-  background: var(--card); padding: 5px 11px; display: flex; gap: 13px; align-items: center;
-  font-size: 11.5px; color: var(--muted); border-top: 1px solid var(--line); flex-wrap: wrap;
+  background: #f8fafc; padding: 4px 11px; display: flex; gap: 13px; align-items: center;
+  font-size: 11.5px; color: var(--muted); border-bottom: 1px solid var(--line); flex-wrap: wrap;
+}
+.sc-legend b {
+  font-size: 10.5px; letter-spacing: .09em; text-transform: uppercase; color: var(--navy);
 }
 .sc-legend i { font-style: normal; display: inline-flex; align-items: center; gap: 4px; }
+.sc-other {
+  margin-left: auto; border: 1px solid var(--line); background: #fff; color: var(--ink);
+  font: 600 11.5px/1 inherit; padding: 4px 8px; border-radius: 5px; cursor: pointer;
+}
+.sc-other:hover { background: #f1f5f9; border-color: #94a3b8; }
 
 /* ------------------------------------------------------------------ phone
    The split is a desktop idea. Below 900px each side becomes a full-width
@@ -269,8 +299,12 @@ table.sc-arow tr:hover td { background: #fafbfd; }
   .sc-mkt { border-left: none; padding-left: 0; width: 100%; flex-wrap: wrap; }
   .sc-scroll9 { max-height: 340px; }
   table.sc-mix td { height: 38px; padding: 5px 8px; }
-  .sc-mrent { width: 78px; font-size: 16px; padding: 7px 6px; }
+  .screener input.sc-mrent { width: 78px; height: auto; font-size: 16px; padding: 7px 6px; }
   .sc-attrs { flex-direction: column; }
+  .sc-htop { flex-wrap: wrap; }
+  .sc-facts { flex-wrap: wrap; flex-basis: 100%; }
+  .sc-mlg { margin-left: 0; }
+  .sc-other { min-height: 38px; }
   .sc-panel { width: 100%; }
   table.sc-arow td { height: 30px; }
   .sc-cyc button { width: 38px; height: 38px; }

@@ -40,6 +40,31 @@
   const PICTURES_FOLDER = '11. Pictures';
   const VISIBLE_ROWS = 9;          // COMPS section capacity; scroll past it
 
+  /* KEY ATTRIBUTES — the fields shown first, in one block above the full
+     Physical / Amenities / Fees panels. Seeded 2026-11-19 from Claude's
+     suggestion in `Market Rents - Attribute Priority v1.xlsx` (APPLETS/Rent
+     Comps Tracker); column K of that file is the owner's call, and when it comes
+     back edited, this list is what changes. Keys, not labels; schema order wins
+     over the order written here. The same keys exist in both families. */
+  const PRIMARY = {
+    physical: ['property_type', 'renovated_year', 'renovated_scope', 'wd_inunit',
+      'wd_hookups', 'specials'],
+    amenities: ['gated', 'pool', 'fitness_center', 'clubhouse', 'dog_park',
+      'covered_parking', 'attached_garages', 'patio_balcony',
+      'stainless_steel_appliances', 'granite_stone_countertops', 'hardwood_floors',
+      'all_bills_paid', 'valet_trash'],
+    fees: ['amenity', 'trash', 'cable_internet'],
+  };
+  /* Show / hide the non-key fields: a per-browser convenience, so storage
+     failing just means they show. */
+  const OTHER_KEY = 'rct.screener.showOther';
+  function showOther() {
+    try { return localStorage.getItem(OTHER_KEY) !== '0'; } catch (e) { return true; }
+  }
+  function setShowOther(on) {
+    try { localStorage.setItem(OTHER_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+  }
+
   const SC = {
     bucket: null,
     compIdx: 0,
@@ -297,17 +322,17 @@
       <div class="sc-rail">${chips}</div>
       <div class="sc-mkt">
         <div class="sc-fig"><div class="lab">Comps suggest</div>
-          <div class="val">${s.suggested > 0 ? money(s.suggested) : '—'}</div>
-          <div class="sub">${esc(s.method)}${s.sampleRows ? ' · ' + s.sampleRows + 'r/' + s.sampleComps + 'c direct' : ''}</div></div>
+          <div class="vl"><span class="val">${s.suggested > 0 ? money(s.suggested) : '—'}</span>
+          <span class="sub">${esc(s.method)}${s.sampleRows ? ' · ' + s.sampleRows + 'r/' + s.sampleComps + 'c direct' : ''}</span></div></div>
         <button class="sc-apply" id="sc-apply"${s.suggested > 0 ? '' : ' disabled'}
           title="Write ${s.suggested > 0 ? money(s.suggested) : 'the suggested rent'} into every ${esc(bucketShortOf(SC.bucket))} plan below">
           Apply to all ${rows.length} &rarr;</button>
         <div class="sc-fig"><div class="lab">Set below</div>
-          <div class="val">${roll.value > 0 ? money(roll.value) : '—'}</div>
-          <div class="sub${roll.priced < roll.total ? ' warn' : ''}">${roll.priced}/${roll.total} rows · unit-wtd</div></div>
+          <div class="vl"><span class="val">${roll.value > 0 ? money(roll.value) : '—'}</span>
+          <span class="sub${roll.priced < roll.total ? ' warn' : ''}">${roll.priced}/${roll.total} rows · unit-wtd</span></div></div>
         <div class="sc-fig"><div class="lab">vs in-place</div>
-          <div class="val ${delta >= 0 ? 'up' : 'dn'}">${delta ? (delta > 0 ? '+' : '−') + money(Math.abs(delta)).slice(1) : '—'}</div>
-          <div class="sub">in-place ${inPlace > 0 ? money(inPlace) : '—'}</div></div>
+          <div class="vl"><span class="val ${delta >= 0 ? 'up' : 'dn'}">${delta ? (delta > 0 ? '+' : '−') + money(Math.abs(delta)).slice(1) : '—'}</span>
+          <span class="sub">in-place ${inPlace > 0 ? money(inPlace) : '—'}</span></div></div>
       </div>
     </div>`;
   }
@@ -322,13 +347,13 @@
     const s = STATE.subject;
     const head = `<div class="sc-head">
       <div class="sc-htop"><span class="sc-tag subject">Subject</span>
-        <span class="sc-name" ${pv('subject', 'name')}>${esc(s.name || STATE.name || '(unnamed)')}</span></div>
+        <span class="sc-name" ${pv('subject', 'name')}>${esc(s.name || STATE.name || '(unnamed)')}</span>
       <div class="sc-facts">
         <span ${pv('subject', 'year_built')}>${esc(s.year_built || '—')}</span>
         <span ${pv('subject', 'total_units')}>${s.total_units ? int(num(s.total_units)) + ' units' : '—'}</span>
         <span ${pv('subject', 'wd_type')}>W/D ${esc(s.wd_type || '—')}</span>
         <span ${pv('subject', 'util_structure')}>${esc(s.util_structure || '—')}</span>
-      </div></div>`;
+      </div></div></div>`;
 
     if (!rows.length) {
       return head + `<div class="sc-body"><div class="sc-empty">
@@ -376,6 +401,8 @@
         <div class="kv"><span class="k">Avg in-place</span><span class="v">${inPlaceAvg > 0 ? money(inPlaceAvg) : '—'}</span></div>
         <div class="kv"><span class="k">Priced</span><span class="v${roll.priced < roll.total ? ' warn' : ''}">${roll.priced}/${roll.total}</span></div>
         ${plans > capacity ? `<div class="kv"><span class="k warn">⚠ COMPS fits ${capacity} plans</span><span class="v warn">${plans} here</span></div>` : ''}
+        <div class="sc-mlg"><i><span class="sc-mrent seed sample">seed</span> from proforma</i>
+          <i><span class="sc-mrent none sample"></span> needs a value</i></div>
       </div>`;
   }
 
@@ -387,8 +414,7 @@
     if (!list.length) {
       return `<div class="sc-head">
           <div class="sc-htop"><span class="sc-tag untyped">None</span>
-            <span class="sc-name">—</span></div>
-          <div class="sc-facts"></div></div>
+            <span class="sc-name">—</span></div></div>
         <div class="sc-body"><div class="sc-empty">
           <span class="big">No comp has a ${esc(bucketShortOf(key))}</span>
           <span>${all.length} comps captured, none with this unit type</span></div></div>`;
@@ -439,18 +465,18 @@
         <div class="sc-htop">
           <span class="sc-tag ${esc(c.category || 'untyped')}">${esc(meta ? meta.label : 'Untyped')}</span>
           <span class="sc-name" ${pv('comp:' + c.compId, 'name')}>${esc(c.name || '(unnamed)')}</span>
+          <div class="sc-facts">
+          <span ${pv('comp:' + c.compId, 'year_built')}${String(c.year_built) === '1950' ? ' class="flag"' : ''}>${esc(c.year_built || '—')}${String(c.year_built) === '1950' ? ' ⚑' : ''}</span>
+          <span ${pv('comp:' + c.compId, 'total_units')}>${c.total_units ? int(num(c.total_units)) + ' units' : '—'}</span>
+          <span ${pv('comp:' + c.compId, 'distance_miles')}${allSameDist ? ' class="flag"' : ''}>${c.distance_miles ? num(c.distance_miles).toFixed(2) + ' mi' : '—'}${allSameDist ? ' ⚑' : ''}</span>
+          <span ${pv('comp:' + c.compId, 'vacancy_pct')}${vac > 30 ? ' class="flag"' : ''}>${c.vacancy_pct !== '' && c.vacancy_pct != null ? vac + '% vac' : '—'}${vac > 30 ? ' ⚑' : ''}</span>
+          </div>
           <div class="sc-cyc">
             <button id="sc-prev" title="Previous comp with this unit type" aria-label="Previous comp">◀</button>
             <span class="pos">${SC.compIdx + 1} / ${list.length}</span>
             <button id="sc-next" title="Next comp with this unit type" aria-label="Next comp">▶</button>
             <div class="sc-dots">${dots}</div>
           </div>
-        </div>
-        <div class="sc-facts">
-          <span ${pv('comp:' + c.compId, 'year_built')}${String(c.year_built) === '1950' ? ' class="flag"' : ''}>${esc(c.year_built || '—')}${String(c.year_built) === '1950' ? ' ⚑' : ''}</span>
-          <span ${pv('comp:' + c.compId, 'total_units')}>${c.total_units ? int(num(c.total_units)) + ' units' : '—'}</span>
-          <span ${pv('comp:' + c.compId, 'distance_miles')}${allSameDist ? ' class="flag"' : ''}>${c.distance_miles ? num(c.distance_miles).toFixed(2) + ' mi' : '—'}${allSameDist ? ' ⚑' : ''}</span>
-          <span ${pv('comp:' + c.compId, 'vacancy_pct')}${vac > 30 ? ' class="flag"' : ''}>${c.vacancy_pct !== '' && c.vacancy_pct != null ? vac + '% vac' : '—'}${vac > 30 ? ' ⚑' : ''}</span>
         </div></div>
       <div class="sc-body sc-scroll9"><table class="sc-mix">
         <thead><tr><th class="l">Plan</th><th>SF</th><th>#</th><th>Ask</th><th>$/SF</th>
@@ -477,6 +503,7 @@
     return '<span class="sc-fee">' + (isNaN(n) ? esc(s) : money(n)) + '</span>';
   }
   function attrPanel(title, items, valueOf, glyph, extra, path) {
+    if (!items.length) return '';
     const filled = items.filter(it => {
       const v = valueOf(it);
       return v !== '' && v != null;
@@ -492,31 +519,67 @@
   function compsFees() {
     return (SCHEMA.fees || []).filter(f => f.compsLabel);
   }
-  function attrsHtml(who, isSubject) {
+  function isPrimary(group, key) { return (PRIMARY[group] || []).indexOf(key) !== -1; }
+
+  /** The values one side shows, read once and shared by both attribute blocks. */
+  function attrSource(who, isSubject) {
     /* PHYSICAL / AMENITIES, not SCHEMA.physical / SCHEMA.amenities: those are the
        MF branch specifically, so reading them here pinned the Screener to MF's
        field list and row map no matter which template the open deal is on. The
-       getters follow the record's family. (SCHEMA.fees below is correct as-is —
-       fees are shared across both templates and name no row.) */
-    const phys = PHYSICAL;
-    const amen = AMENITIES;
-    const fees = compsFees();
-    /* The subject's band has been captured since 2026-11-17 (tab 1, or Import
-       from Proforma). The badge now says so only when nothing is recorded yet,
-       and points at where to fill it, instead of claiming the tracker cannot. */
-    const src = isSubject && !subjectBandHasData(who)
-      ? '<span class="src" title="Nothing recorded for the subject yet — fill it on tab 1, or import it from the proforma">not captured</span>'
-      : '';
+       getters follow the record's family. (SCHEMA.fees is correct as-is — fees
+       are shared across both templates and name no row.) */
     const P = isSubject && who
       ? PHYSICAL.reduce((a, it) => { a[it.key] = subjectPhysicalValue(it, who); return a; }, {})
       : ((who && who.physical) || {});
-    const A = (who && who.amenities) || {};
-    const F = (who && who.fees) || {};
-    const base = isSubject ? 'subject' : (who && who.compId ? 'comp:' + who.compId : '');
-    return attrPanel('Physical', phys, it => P[it.key], triGlyph, src, base && base + '.physical')
-      + attrPanel('Amenities', amen, it => A[it.key], triGlyph, src, base && base + '.amenities')
-      + attrPanel('Fees', fees.map(f => ({ key: f.key, label: f.compsLabel || f.label })),
-        it => F[it.key], feeGlyph, src, base && base + '.fees');
+    /* The subject's band has been captured since 2026-11-17 (tab 1, or Import
+       from Proforma). The badge says so only when nothing is recorded yet, and
+       points at where to fill it. */
+    const src = isSubject && !subjectBandHasData(who)
+      ? '<span class="src" title="Nothing recorded for the subject yet — fill it on tab 1, or import it from the proforma">not captured</span>'
+      : '';
+    return {
+      P, A: (who && who.amenities) || {}, F: (who && who.fees) || {}, src,
+      base: isSubject ? 'subject' : (who && who.compId ? 'comp:' + who.compId : ''),
+      fees: compsFees().map(f => ({ key: f.key, label: f.compsLabel || f.label })),
+    };
+  }
+
+  /** Key attributes: every primary field from all three groups in one panel,
+      in two columns. Both sides list the same items in the same order, so the
+      subject and comp rows line up across the split. */
+  function primaryHtml(who, isSubject) {
+    const d = attrSource(who, isSubject);
+    const items = [];
+    PHYSICAL.forEach(it => { if (isPrimary('physical', it.key)) items.push({ key: it.key, g: 'physical', v: d.P[it.key], glyph: triGlyph, label: it.label }); });
+    AMENITIES.forEach(it => { if (isPrimary('amenities', it.key)) items.push({ key: it.key, g: 'amenities', v: d.A[it.key], glyph: triGlyph, label: it.label }); });
+    d.fees.forEach(it => { if (isPrimary('fees', it.key)) items.push({ key: it.key, g: 'fees', v: d.F[it.key], glyph: feeGlyph, label: it.label + ' fee' }); });
+    if (!items.length) return '';
+    const filled = items.filter(x => x.v !== '' && x.v != null).length;
+    const row = x => `<tr><td class="al" title="${esc(x.label)}">${esc(x.label)}</td>
+        <td class="av"${d.base ? ' ' + pv(d.base + '.' + x.g, x.key) : ''}>${x.glyph(x.v)}</td></tr>`;
+    const half = Math.ceil(items.length / 2);
+    return `<div class="sc-panel sc-prim"><h4><span>Key attributes</span>${d.src}
+        <span class="cov">${filled}/${items.length}</span></h4>
+      <div class="sc-pcols">
+        <table class="sc-arow"><tbody>${items.slice(0, half).map(row).join('')}</tbody></table>
+        <table class="sc-arow"><tbody>${items.slice(half).map(row).join('')}</tbody></table>
+      </div></div>`;
+  }
+
+  /** Everything not in the key block, in the existing three groups. */
+  function otherAttrsHtml(who, isSubject) {
+    const d = attrSource(who, isSubject);
+    return attrPanel('Physical', PHYSICAL.filter(it => !isPrimary('physical', it.key)),
+        it => d.P[it.key], triGlyph, d.src, d.base && d.base + '.physical')
+      + attrPanel('Amenities', AMENITIES.filter(it => !isPrimary('amenities', it.key)),
+        it => d.A[it.key], triGlyph, d.src, d.base && d.base + '.amenities')
+      + attrPanel('Fees', d.fees.filter(it => !isPrimary('fees', it.key)),
+        it => d.F[it.key], feeGlyph, d.src, d.base && d.base + '.fees');
+  }
+  function otherCount() {
+    return PHYSICAL.filter(it => !isPrimary('physical', it.key)).length
+      + AMENITIES.filter(it => !isPrimary('amenities', it.key)).length
+      + compsFees().filter(f => !isPrimary('fees', f.key)).length;
   }
 
   // -------------------------------------------------------------- photo band
@@ -565,16 +628,13 @@
 
     const list = compsWithBucket(SC.bucket);
     const comp = list.length ? list[Math.min(SC.compIdx, list.length - 1)] : null;
+    const other = showOther();
 
     host.innerHTML = `<div class="screener">
       ${railHtml()}
       <div class="sc-split sc-band2">
         <div class="sc-side left" id="sc-subj">${subjectPaneHtml()}</div>
         <div class="sc-side" id="sc-comp">${compPaneHtml()}</div>
-      </div>
-      <div class="sc-split sc-band3">
-        <div class="sc-side left"><div class="sc-attrs">${attrsHtml(STATE.subject, true)}</div></div>
-        <div class="sc-side"><div class="sc-attrs">${comp ? attrsHtml(comp, false) : ''}</div></div>
       </div>
       <div class="sc-split sc-band4">
         <div class="sc-side left"><div class="sc-photos" id="sc-sphotos">${
@@ -583,12 +643,21 @@
           comp ? photoStripHtml(SC.photos['comp:' + comp.compId], 'Photos') : ''}</div></div>
       </div>
       <div class="sc-legend">
+        <b>Attributes</b>
         <i><span class="sc-g y">Y</span> has</i>
         <i><span class="sc-g n">N</span> hasn't</i>
         <i><span class="sc-g b">·</span> not captured</i>
-        <i><span class="sc-mrent seed sample">seed</span> from proforma</i>
-        <i><span class="sc-mrent none sample"></span> needs a value</i>
+        <button type="button" class="sc-other" id="sc-other" aria-expanded="${other ? 'true' : 'false'}">${
+          other ? 'Hide' : 'Show'} the other ${otherCount()} fields</button>
       </div>
+      <div class="sc-split sc-band3">
+        <div class="sc-side left"><div class="sc-attrs">${primaryHtml(STATE.subject, true)}</div></div>
+        <div class="sc-side"><div class="sc-attrs">${comp ? primaryHtml(comp, false) : ''}</div></div>
+      </div>
+      ${other ? `<div class="sc-split sc-band3 sc-band3b">
+        <div class="sc-side left"><div class="sc-attrs">${otherAttrsHtml(STATE.subject, true)}</div></div>
+        <div class="sc-side"><div class="sc-attrs">${comp ? otherAttrsHtml(comp, false) : ''}</div></div>
+      </div>` : ''}
     </div>`;
 
     wire();
@@ -649,6 +718,8 @@
       };
     });
     const prev = $('#sc-prev'), next = $('#sc-next'), apply = $('#sc-apply');
+    const otherBtn = $('#sc-other');
+    if (otherBtn) otherBtn.onclick = () => { setShowOther(!showOther()); renderScreener(); };
     if (prev) prev.onclick = () => {
       const n = compsWithBucket(SC.bucket).length;
       if (n) { SC.compIdx = (SC.compIdx - 1 + n) % n; renderScreener(); }
@@ -721,6 +792,6 @@
   window.SCREENER = {
     compsWithBucket, anchorRowFor, marketOf, setMarketForPlan,
     syncBucketOverride, bucketRollup, proformaSeed, sanitizeFolderName,
-    state: SC,
+    primary: PRIMARY, state: SC,
   };
 })();
