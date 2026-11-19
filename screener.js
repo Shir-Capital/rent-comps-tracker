@@ -53,17 +53,36 @@
       'covered_parking', 'attached_garages', 'patio_balcony',
       'stainless_steel_appliances', 'granite_stone_countertops', 'hardwood_floors',
       'all_bills_paid', 'valet_trash'],
-    fees: ['amenity', 'trash', 'cable_internet'],
   };
-  /* Show / hide the non-key fields: a per-browser convenience, so storage
-     failing just means they show. */
+  /* FEES are not in PRIMARY: every COMPS fee is always shown, as its own strip
+     at the top of the key block (owner, 2026-11-19), even when blank. */
+
+  /* DUPLICATE PAIRS — the COMPS band asks three questions twice, once under
+     Physical and once under Amenities. The Screener shows ONE row per pair
+     (the Physical one); its value is the Physical answer, else the Amenities
+     answer, and a pair that disagrees shows both, flagged. The record and the
+     export are untouched: both rows still exist on the template until the
+     "SHIR_MF_Template- Nov Update 2" session retires the Amenities rows. */
+  const MERGED = [
+    { keep: 'wd_inunit', drop: 'w_d_provided' },
+    { keep: 'wd_hookups', drop: 'w_d_connections' },
+    { keep: 'priv_yards', drop: 'private_yards' },
+  ];
+  const MERGED_DROP = MERGED.map(m => m.drop);
+  function amenitiesShown() { return AMENITIES.filter(it => MERGED_DROP.indexOf(it.key) === -1); }
+
+  /* Per-browser show / hide switches. Storage failing just means "shown". */
   const OTHER_KEY = 'rct.screener.showOther';
-  function showOther() {
-    try { return localStorage.getItem(OTHER_KEY) !== '0'; } catch (e) { return true; }
+  const PHOTOS_KEY = 'rct.screener.showPhotos';
+  function readOn(k) {
+    try { return localStorage.getItem(k) !== '0'; } catch (e) { return true; }
   }
-  function setShowOther(on) {
-    try { localStorage.setItem(OTHER_KEY, on ? '1' : '0'); } catch (e) { /* ignore */ }
+  function writeOn(k, on) {
+    try { localStorage.setItem(k, on ? '1' : '0'); } catch (e) { /* ignore */ }
   }
+  function showOther() { return readOn(OTHER_KEY); }
+  function setShowOther(on) { writeOn(OTHER_KEY, on); }
+  function showPhotos() { return readOn(PHOTOS_KEY); }
 
   const SC = {
     bucket: null,
@@ -537,28 +556,64 @@
     const src = isSubject && !subjectBandHasData(who)
       ? '<span class="src" title="Nothing recorded for the subject yet — fill it on tab 1, or import it from the proforma">not captured</span>'
       : '';
+    const A = (who && who.amenities) || {};
+    /* Fold each duplicate pair into its Physical row. `from` records which
+       group supplied the shown value, so the source card points at it. */
+    const PM = Object.assign({}, P), from = {}, clash = {};
+    const blank = v => v === '' || v == null;
+    MERGED.forEach(m => {
+      const a = P[m.keep], b = A[m.drop];
+      if (blank(a) && !blank(b)) { PM[m.keep] = b; from[m.keep] = 'amenities:' + m.drop; }
+      else if (!blank(a) && !blank(b) && String(a).trim().toUpperCase() !== String(b).trim().toUpperCase()) {
+        clash[m.keep] = { a, b };
+      }
+    });
     return {
-      P, A: (who && who.amenities) || {}, F: (who && who.fees) || {}, src,
+      P: PM, A, F: (who && who.fees) || {}, src, from, clash,
       base: isSubject ? 'subject' : (who && who.compId ? 'comp:' + who.compId : ''),
       fees: compsFees().map(f => ({ key: f.key, label: f.compsLabel || f.label })),
     };
+  }
+  /** Source-card path for a Physical row that may be showing its Amenities twin. */
+  function physPath(d, key) {
+    if (!d.base) return '';
+    const f = d.from[key];
+    return f ? pv(d.base + '.amenities', f.split(':')[1]) : pv(d.base + '.physical', key);
+  }
+  function physGlyph(d, key) {
+    const c = d.clash[key];
+    if (!c) return triGlyph(d.P[key]);
+    const t = 'Physical says ' + c.a + ', Amenities says ' + c.b;
+    return '<span class="sc-txt sc-clash" title="' + esc(t) + '">' + esc(c.a + ' / ' + c.b) + '</span>';
   }
 
   /** Key attributes: every primary field from all three groups in one panel,
       in two columns. Both sides list the same items in the same order, so the
       subject and comp rows line up across the split. */
+  /** The fee strip: every COMPS fee, always, in one row of label-over-value
+      cells. Same order on both sides. */
+  function feesStripHtml(d) {
+    const cells = d.fees.map(f => `<div class="sc-fcell">
+        <span class="fl" title="${esc(f.label)}">${esc(f.label)}</span>
+        <span class="fv"${d.base ? ' ' + pv(d.base + '.fees', f.key) : ''}>${feeGlyph(d.F[f.key])}</span></div>`).join('');
+    const filled = d.fees.filter(f => { const v = d.F[f.key]; return v !== '' && v != null; }).length;
+    return `<div class="sc-panel sc-feesp"><h4><span>Fees</span>
+        <span class="cov">${filled}/${d.fees.length}</span></h4>
+      <div class="sc-frow">${cells}</div></div>`;
+  }
+
   function primaryHtml(who, isSubject) {
     const d = attrSource(who, isSubject);
     const items = [];
-    PHYSICAL.forEach(it => { if (isPrimary('physical', it.key)) items.push({ key: it.key, g: 'physical', v: d.P[it.key], glyph: triGlyph, label: it.label }); });
-    AMENITIES.forEach(it => { if (isPrimary('amenities', it.key)) items.push({ key: it.key, g: 'amenities', v: d.A[it.key], glyph: triGlyph, label: it.label }); });
-    d.fees.forEach(it => { if (isPrimary('fees', it.key)) items.push({ key: it.key, g: 'fees', v: d.F[it.key], glyph: feeGlyph, label: it.label + ' fee' }); });
-    if (!items.length) return '';
+    PHYSICAL.forEach(it => { if (isPrimary('physical', it.key)) items.push({ label: it.label, v: d.P[it.key], at: physPath(d, it.key), html: physGlyph(d, it.key) }); });
+    amenitiesShown().forEach(it => { if (isPrimary('amenities', it.key)) items.push({ label: it.label, v: d.A[it.key], at: d.base ? pv(d.base + '.amenities', it.key) : '', html: triGlyph(d.A[it.key]) }); });
+    const fees = feesStripHtml(d);
+    if (!items.length) return fees;
     const filled = items.filter(x => x.v !== '' && x.v != null).length;
     const row = x => `<tr><td class="al" title="${esc(x.label)}">${esc(x.label)}</td>
-        <td class="av"${d.base ? ' ' + pv(d.base + '.' + x.g, x.key) : ''}>${x.glyph(x.v)}</td></tr>`;
+        <td class="av"${x.at ? ' ' + x.at : ''}>${x.html}</td></tr>`;
     const half = Math.ceil(items.length / 2);
-    return `<div class="sc-panel sc-prim"><h4><span>Key attributes</span>${d.src}
+    return fees + `<div class="sc-panel sc-prim"><h4><span>Key attributes</span>${d.src}
         <span class="cov">${filled}/${items.length}</span></h4>
       <div class="sc-pcols">
         <table class="sc-arow"><tbody>${items.slice(0, half).map(row).join('')}</tbody></table>
@@ -566,20 +621,22 @@
       </div></div>`;
   }
 
-  /** Everything not in the key block, in the existing three groups. */
+  /** Everything not in the key block: Physical and Amenities (fees are all up top). */
   function otherAttrsHtml(who, isSubject) {
     const d = attrSource(who, isSubject);
-    return attrPanel('Physical', PHYSICAL.filter(it => !isPrimary('physical', it.key)),
-        it => d.P[it.key], triGlyph, d.src, d.base && d.base + '.physical')
-      + attrPanel('Amenities', AMENITIES.filter(it => !isPrimary('amenities', it.key)),
-        it => d.A[it.key], triGlyph, d.src, d.base && d.base + '.amenities')
-      + attrPanel('Fees', d.fees.filter(it => !isPrimary('fees', it.key)),
-        it => d.F[it.key], feeGlyph, d.src, d.base && d.base + '.fees');
+    const phys = PHYSICAL.filter(it => !isPrimary('physical', it.key));
+    const physRows = phys.length ? `<div class="sc-panel"><h4><span>Physical</span>${d.src}
+        <span class="cov">${phys.filter(it => d.P[it.key] !== '' && d.P[it.key] != null).length}/${phys.length}</span></h4>
+      <table class="sc-arow"><tbody>${phys.map(it => `<tr>
+        <td class="al" title="${esc(it.label)}">${esc(it.label)}</td>
+        <td class="av"${d.base ? ' ' + physPath(d, it.key) : ''}>${physGlyph(d, it.key)}</td></tr>`).join('')}</tbody></table></div>` : '';
+    return physRows
+      + attrPanel('Amenities', amenitiesShown().filter(it => !isPrimary('amenities', it.key)),
+        it => d.A[it.key], triGlyph, d.src, d.base && d.base + '.amenities');
   }
   function otherCount() {
     return PHYSICAL.filter(it => !isPrimary('physical', it.key)).length
-      + AMENITIES.filter(it => !isPrimary('amenities', it.key)).length
-      + compsFees().filter(f => !isPrimary('fees', f.key)).length;
+      + amenitiesShown().filter(it => !isPrimary('amenities', it.key)).length;
   }
 
   // -------------------------------------------------------------- photo band
@@ -629,6 +686,7 @@
     const list = compsWithBucket(SC.bucket);
     const comp = list.length ? list[Math.min(SC.compIdx, list.length - 1)] : null;
     const other = showOther();
+    const photos = showPhotos();
 
     host.innerHTML = `<div class="screener">
       ${railHtml()}
@@ -636,12 +694,17 @@
         <div class="sc-side left" id="sc-subj">${subjectPaneHtml()}</div>
         <div class="sc-side" id="sc-comp">${compPaneHtml()}</div>
       </div>
-      <div class="sc-split sc-band4">
-        <div class="sc-side left"><div class="sc-photos" id="sc-sphotos">${
-          photoStripHtml(SC.photos['subject'], 'Photos')}</div></div>
-        <div class="sc-side"><div class="sc-photos" id="sc-cphotos">${
-          comp ? photoStripHtml(SC.photos['comp:' + comp.compId], 'Photos') : ''}</div></div>
+      <div class="sc-legend sc-pbar">
+        <b>Photos</b>
+        <button type="button" class="sc-other" id="sc-photos-tog" aria-expanded="${photos ? 'true' : 'false'}">${
+          photos ? 'Hide photos' : 'Show photos'}</button>
       </div>
+      ${photos ? `<div class="sc-split sc-band4">
+        <div class="sc-side left"><div class="sc-photos" id="sc-sphotos">${
+          photoStripHtml(SC.photos['subject'], 'Subject')}</div></div>
+        <div class="sc-side"><div class="sc-photos" id="sc-cphotos">${
+          comp ? photoStripHtml(SC.photos['comp:' + comp.compId], 'Comp') : ''}</div></div>
+      </div>` : ''}
       <div class="sc-legend">
         <b>Attributes</b>
         <i><span class="sc-g y">Y</span> has</i>
@@ -651,8 +714,8 @@
           other ? 'Hide' : 'Show'} the other ${otherCount()} fields</button>
       </div>
       <div class="sc-split sc-band3">
-        <div class="sc-side left"><div class="sc-attrs">${primaryHtml(STATE.subject, true)}</div></div>
-        <div class="sc-side"><div class="sc-attrs">${comp ? primaryHtml(comp, false) : ''}</div></div>
+        <div class="sc-side left"><div class="sc-attrs col">${primaryHtml(STATE.subject, true)}</div></div>
+        <div class="sc-side"><div class="sc-attrs col">${comp ? primaryHtml(comp, false) : ''}</div></div>
       </div>
       ${other ? `<div class="sc-split sc-band3 sc-band3b">
         <div class="sc-side left"><div class="sc-attrs">${otherAttrsHtml(STATE.subject, true)}</div></div>
@@ -661,7 +724,7 @@
     </div>`;
 
     wire();
-    loadPhotos(comp);
+    if (photos) loadPhotos(comp);       // no Drive calls while the section is shut
   }
 
   function loadPhotos(comp) {
@@ -669,7 +732,7 @@
       resolvePhotos('subject').then(set => {
         if (set == null) return;
         const el = $('#sc-sphotos');
-        if (el && CURRENT_PHASE === 3) el.innerHTML = photoStripHtml(set, 'Photos');
+        if (el && CURRENT_PHASE === 3) el.innerHTML = photoStripHtml(set, 'Subject');
       });
     }
     if (comp) {
@@ -679,7 +742,7 @@
         resolvePhotos('comp', comp, idx).then(set => {
           if (set == null) return;
           const el = $('#sc-cphotos');
-          if (el && CURRENT_PHASE === 3) el.innerHTML = photoStripHtml(set, 'Photos');
+          if (el && CURRENT_PHASE === 3) el.innerHTML = photoStripHtml(set, 'Comp');
         });
       }
     }
@@ -720,6 +783,8 @@
     const prev = $('#sc-prev'), next = $('#sc-next'), apply = $('#sc-apply');
     const otherBtn = $('#sc-other');
     if (otherBtn) otherBtn.onclick = () => { setShowOther(!showOther()); renderScreener(); };
+    const photoBtn = $('#sc-photos-tog');
+    if (photoBtn) photoBtn.onclick = () => { writeOn(PHOTOS_KEY, !showPhotos()); renderScreener(); };
     if (prev) prev.onclick = () => {
       const n = compsWithBucket(SC.bucket).length;
       if (n) { SC.compIdx = (SC.compIdx - 1 + n) % n; renderScreener(); }
@@ -792,6 +857,6 @@
   window.SCREENER = {
     compsWithBucket, anchorRowFor, marketOf, setMarketForPlan,
     syncBucketOverride, bucketRollup, proformaSeed, sanitizeFolderName,
-    primary: PRIMARY, state: SC,
+    primary: PRIMARY, merged: MERGED, state: SC,
   };
 })();

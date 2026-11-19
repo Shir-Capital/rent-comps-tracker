@@ -46,6 +46,21 @@ async function tryOpenPendingDeepLink() {
   await openRemoteProperty(entry);
 }
 
+// ------------------------------------------------------ compact header
+/* A per-browser display choice (menu -> Display). Storage failing just means
+   the full-size header, so every access is guarded. The CSS lives in
+   styles.css under html.compact-chrome, inside the desktop media query. */
+const COMPACT_CHROME_KEY = 'rent_comps_compact_header_v1';
+function compactChromeOn() {
+  try { return localStorage.getItem(COMPACT_CHROME_KEY) === '1'; } catch (e) { return false; }
+}
+function applyCompactChrome() {
+  const on = compactChromeOn();
+  document.documentElement.classList.toggle('compact-chrome', on);
+  const b = $('#btn-compact-header');
+  if (b) b.textContent = 'Compact header: ' + (on ? 'On' : 'Off');
+}
+
 // ----------------------------------------------------------------- drawer
 function openDrawer() {
   $('#menu-drawer').classList.remove('hidden');
@@ -235,6 +250,10 @@ function wireDrawer() {
       toast('Backup failed: ' + (e.message || e));
     }
   };
+  $('#btn-compact-header').onclick = () => {
+    try { localStorage.setItem(COMPACT_CHROME_KEY, compactChromeOn() ? '0' : '1'); } catch (e) { /* ignore */ }
+    applyCompactChrome();
+  };
   $('#btn-export-json').onclick = () => { closeDrawer(); exportPopulatorJson(); };
   $('#btn-export-xlsx').onclick = () => { closeDrawer(); exportWorkbook({ toDrive: true }); };
 
@@ -270,6 +289,7 @@ async function boot() {
   }
 
   loadStore();
+  applyCompactChrome();
 
   const phaseHost = $('#phase-content');
   wireFieldDelegation(phaseHost);

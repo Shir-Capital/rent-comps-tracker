@@ -200,6 +200,25 @@ table.sc-mix .psf { color: var(--muted); font-size: 12.5px; }
 /* ---------------------------------------------------------------- band 3 */
 .sc-band3 { border-bottom: 2px solid #cbd5e1; }
 .sc-attrs { padding: 6px 11px 8px; display: flex; gap: 9px; align-items: flex-start; }
+/* The priority block stacks: fee strip, then key attributes. */
+.sc-attrs.col { flex-direction: column; align-items: stretch; gap: 6px; }
+.sc-attrs.col > .sc-panel { flex: 0 0 auto; width: 100%; }
+/* Fee strip: every COMPS fee in one row, label over value. */
+.sc-frow { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); }
+.sc-fcell {
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+  padding: 2px 4px; border-right: 1px solid #f1f5f9; min-width: 0;
+}
+.sc-fcell:last-child { border-right: none; }
+.sc-fcell .fl {
+  font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; max-width: 100%;
+}
+.sc-fcell .fv { line-height: 1.2; }
+/* A duplicate pair whose two answers disagree. */
+.sc-txt.sc-clash { color: var(--err); background: var(--err-bg); }
+/* Photos section bar: same look as the attributes bar, no key. */
+.sc-legend.sc-pbar { border-top: none; }
 /* Key attributes: one panel, two columns, a hairline between them. */
 .sc-prim .sc-pcols { display: grid; grid-template-columns: 1fr 1fr; }
 .sc-prim .sc-pcols > table + table { border-left: 1px solid var(--line); }
