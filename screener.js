@@ -259,6 +259,13 @@
   }
 
   // ------------------------------------------------------------------ render
+  /* The record + field a cell shows, for provenance.js's source cards. Paths use
+     the same grammar as the tracker's own inputs ('subject', 'comp:<id>',
+     'comp:<id>.physical', 'unit:subject:<rowId>', 'unit:comp:<id>:<rowId>'). */
+  function pv(path, key) {
+    return 'data-pvpath="' + esc(path) + '" data-pvkey="' + esc(key) + '"';
+  }
+
   function statusClass(s) {
     const t = String(s || '').toLowerCase();
     if (t.indexOf('orig') === 0) return 'orig';
@@ -315,12 +322,12 @@
     const s = STATE.subject;
     const head = `<div class="sc-head">
       <div class="sc-htop"><span class="sc-tag subject">Subject</span>
-        <span class="sc-name">${esc(s.name || STATE.name || '(unnamed)')}</span></div>
+        <span class="sc-name" ${pv('subject', 'name')}>${esc(s.name || STATE.name || '(unnamed)')}</span></div>
       <div class="sc-facts">
-        <span>${esc(s.year_built || '—')}</span>
-        <span>${s.total_units ? int(num(s.total_units)) + ' units' : '—'}</span>
-        <span>W/D ${esc(s.wd_type || '—')}</span>
-        <span>${esc(s.util_structure || '—')}</span>
+        <span ${pv('subject', 'year_built')}>${esc(s.year_built || '—')}</span>
+        <span ${pv('subject', 'total_units')}>${s.total_units ? int(num(s.total_units)) + ' units' : '—'}</span>
+        <span ${pv('subject', 'wd_type')}>W/D ${esc(s.wd_type || '—')}</span>
+        <span ${pv('subject', 'util_structure')}>${esc(s.util_structure || '—')}</span>
       </div></div>`;
 
     if (!rows.length) {
@@ -335,14 +342,15 @@
       const vac = String(r.vacant_count == null ? '' : r.vacant_count).trim();
       const vacN = vac === '' ? null : num(vac);
       const hiVac = vacN != null && num(r.count) > 0 && vacN / num(r.count) >= 0.5;
+      const up = 'unit:subject:' + r.id;
       return `<tr class="sc-pick${i === SC.anchor ? ' anchor' : ''}" data-scrow="${i}">
-        <td class="l plan">${esc(r.plan || '—')}${i === SC.anchor ? ' <span class="sc-near">ANCHOR</span>' : ''}</td>
-        <td class="l"><span class="sc-st ${statusClass(r.status)}">${esc(r.status || '—')}</span></td>
-        <td>${r.sqft ? int(num(r.sqft)) : '—'}</td>
-        <td>${r.count ? int(num(r.count)) : '—'}</td>
-        <td class="sc-vac${hiVac ? ' hi' : ''}">${vacN == null ? '—' : int(vacN)}</td>
-        <td class="rent">${inPlace > 0 ? money(inPlace) : '—'}</td>
-        <td><input type="number" inputmode="decimal" step="any"
+        <td class="l plan" ${pv(up, 'plan')}>${esc(r.plan || '—')}${i === SC.anchor ? ' <span class="sc-near">ANCHOR</span>' : ''}</td>
+        <td class="l" ${pv(up, 'status')}><span class="sc-st ${statusClass(r.status)}">${esc(r.status || '—')}</span></td>
+        <td ${pv(up, 'sqft')}>${r.sqft ? int(num(r.sqft)) : '—'}</td>
+        <td ${pv(up, 'count')}>${r.count ? int(num(r.count)) : '—'}</td>
+        <td class="sc-vac${hiVac ? ' hi' : ''}" ${pv(up, 'vacant_count')}>${vacN == null ? '—' : int(vacN)}</td>
+        <td class="rent" ${pv(up, 'current_rent')}>${inPlace > 0 ? money(inPlace) : '—'}</td>
+        <td ${pv(up, 'market_rent')}><input type="number" inputmode="decimal" step="any"
               class="sc-mrent ${m.src === 'user' ? 'user' : (m.src === 'proforma' ? 'seed' : 'none')}"
               data-scmkt="${i}" value="${m.value > 0 ? Math.round(m.value) : ''}"
               placeholder="—" aria-label="Market rent for ${esc(r.plan)} ${esc(r.status)}" /></td>
@@ -411,11 +419,12 @@
       const ask = num(r.ask_rent);
       const d = aRent > 0 && ask > 0 ? ask - aRent : null;
       const sf = num(r.sqft);
+      const cu = 'unit:comp:' + c.compId + ':' + r.id;
       return `<tr>
-        <td class="l plan">${esc(r.plan || '—')}${r === nearest ? ' <span class="sc-near">NEAREST</span>' : ''}</td>
-        <td>${sf ? int(sf) : '—'}</td>
-        <td>${r.count ? int(num(r.count)) : '—'}</td>
-        <td class="rent">${ask > 0 ? money(ask) : '—'}</td>
+        <td class="l plan" ${pv(cu, 'plan')}>${esc(r.plan || '—')}${r === nearest ? ' <span class="sc-near">NEAREST</span>' : ''}</td>
+        <td ${pv(cu, 'sqft')}>${sf ? int(sf) : '—'}</td>
+        <td ${pv(cu, 'count')}>${r.count ? int(num(r.count)) : '—'}</td>
+        <td class="rent" ${pv(cu, 'ask_rent')}>${ask > 0 ? money(ask) : '—'}</td>
         <td class="psf">${ask > 0 && sf > 0 ? '$' + (ask / sf).toFixed(2) : '—'}</td>
         <td><span class="sc-dlt ${d == null ? 'flat' : (d > 0 ? 'up' : (d < 0 ? 'dn' : 'flat'))}">${
           d == null ? '—' : (d > 0 ? '+' : '−') + money(Math.abs(d)).slice(1)}</span></td>
@@ -429,7 +438,7 @@
     return `<div class="sc-head">
         <div class="sc-htop">
           <span class="sc-tag ${esc(c.category || 'untyped')}">${esc(meta ? meta.label : 'Untyped')}</span>
-          <span class="sc-name">${esc(c.name || '(unnamed)')}</span>
+          <span class="sc-name" ${pv('comp:' + c.compId, 'name')}>${esc(c.name || '(unnamed)')}</span>
           <div class="sc-cyc">
             <button id="sc-prev" title="Previous comp with this unit type" aria-label="Previous comp">◀</button>
             <span class="pos">${SC.compIdx + 1} / ${list.length}</span>
@@ -438,10 +447,10 @@
           </div>
         </div>
         <div class="sc-facts">
-          <span${String(c.year_built) === '1950' ? ' class="flag"' : ''}>${esc(c.year_built || '—')}${String(c.year_built) === '1950' ? ' ⚑' : ''}</span>
-          <span>${c.total_units ? int(num(c.total_units)) + ' units' : '—'}</span>
-          <span${allSameDist ? ' class="flag"' : ''}>${c.distance_miles ? num(c.distance_miles).toFixed(2) + ' mi' : '—'}${allSameDist ? ' ⚑' : ''}</span>
-          <span${vac > 30 ? ' class="flag"' : ''}>${c.vacancy_pct !== '' && c.vacancy_pct != null ? vac + '% vac' : '—'}${vac > 30 ? ' ⚑' : ''}</span>
+          <span ${pv('comp:' + c.compId, 'year_built')}${String(c.year_built) === '1950' ? ' class="flag"' : ''}>${esc(c.year_built || '—')}${String(c.year_built) === '1950' ? ' ⚑' : ''}</span>
+          <span ${pv('comp:' + c.compId, 'total_units')}>${c.total_units ? int(num(c.total_units)) + ' units' : '—'}</span>
+          <span ${pv('comp:' + c.compId, 'distance_miles')}${allSameDist ? ' class="flag"' : ''}>${c.distance_miles ? num(c.distance_miles).toFixed(2) + ' mi' : '—'}${allSameDist ? ' ⚑' : ''}</span>
+          <span ${pv('comp:' + c.compId, 'vacancy_pct')}${vac > 30 ? ' class="flag"' : ''}>${c.vacancy_pct !== '' && c.vacancy_pct != null ? vac + '% vac' : '—'}${vac > 30 ? ' ⚑' : ''}</span>
         </div></div>
       <div class="sc-body sc-scroll9"><table class="sc-mix">
         <thead><tr><th class="l">Plan</th><th>SF</th><th>#</th><th>Ask</th><th>$/SF</th>
@@ -459,7 +468,7 @@
     if (v === 'Y') return '<span class="sc-g y">Y</span>';
     if (v === 'N') return '<span class="sc-g n">N</span>';
     if (v === '' || v == null) return '<span class="sc-g b">·</span>';
-    return '<span class="sc-txt">' + esc(v) + '</span>';
+    return '<span class="sc-txt" title="' + esc(v) + '">' + esc(v) + '</span>';
   }
   function feeGlyph(v) {
     const s = String(v == null ? '' : v).trim();
@@ -467,14 +476,14 @@
     const n = Number(s);
     return '<span class="sc-fee">' + (isNaN(n) ? esc(s) : money(n)) + '</span>';
   }
-  function attrPanel(title, items, valueOf, glyph, extra) {
+  function attrPanel(title, items, valueOf, glyph, extra, path) {
     const filled = items.filter(it => {
       const v = valueOf(it);
       return v !== '' && v != null;
     }).length;
     const rows = items.map(it => `<tr>
         <td class="al" title="${esc(it.label)}">${esc(it.label)}</td>
-        <td class="av">${glyph(valueOf(it))}</td></tr>`).join('');
+        <td class="av"${path ? ' ' + pv(path, it.key) : ''}>${glyph(valueOf(it))}</td></tr>`).join('');
     return `<div class="sc-panel"><h4><span>${esc(title)}</span>${extra || ''}
       <span class="cov">${filled}/${items.length}</span></h4>
       <table class="sc-arow"><tbody>${rows}</tbody></table></div>`;
@@ -503,10 +512,11 @@
       : ((who && who.physical) || {});
     const A = (who && who.amenities) || {};
     const F = (who && who.fees) || {};
-    return attrPanel('Physical', phys, it => P[it.key], triGlyph, src)
-      + attrPanel('Amenities', amen, it => A[it.key], triGlyph, src)
+    const base = isSubject ? 'subject' : (who && who.compId ? 'comp:' + who.compId : '');
+    return attrPanel('Physical', phys, it => P[it.key], triGlyph, src, base && base + '.physical')
+      + attrPanel('Amenities', amen, it => A[it.key], triGlyph, src, base && base + '.amenities')
       + attrPanel('Fees', fees.map(f => ({ key: f.key, label: f.compsLabel || f.label })),
-        it => F[it.key], feeGlyph, src);
+        it => F[it.key], feeGlyph, src, base && base + '.fees');
   }
 
   // -------------------------------------------------------------- photo band

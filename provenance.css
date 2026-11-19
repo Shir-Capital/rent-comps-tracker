@@ -1,12 +1,14 @@
 /* provenance.css — source ticks and the hover card (provenance.js).
  *
  * The cue is a corner tick, the same idea as a cell comment in Excel: present
- * only where a record exists, coloured by kind, never moving the layout.
+ * on every filled field, coloured by kind, never moving the layout.
  *   green  looked up, with a time
  *   amber  looked up, but no lookup time was recorded
  *   blue   computed by a script (column G, scores)
  *   red    the run's value differs from what the tracker holds now
- *   grey   edited in the tracker after the import
+ *   grey   edited in the tracker (or typed there)
+ *   teal   from the proforma import (no results file covers it)
+ *   pale   filled, but its source was never recorded
  */
 
 :root {
@@ -15,6 +17,8 @@
   --pv-computed: #2563eb;
   --pv-differs: #dc2626;
   --pv-edited: #94a3b8;
+  --pv-import: #0d9488;
+  --pv-unknown: #cbd5e1;
 }
 
 .pv-on { position: relative; }
@@ -42,10 +46,16 @@
 .pv-on[data-pvkind="computed"] > .pv-tick::after { border-right-color: var(--pv-computed); }
 .pv-on[data-pvkind="differs"]  > .pv-tick::after { border-right-color: var(--pv-differs); }
 .pv-on[data-pvkind="edited"]   > .pv-tick::after { border-right-color: var(--pv-edited); }
+.pv-on[data-pvkind="entered"]  > .pv-tick::after { border-right-color: var(--pv-edited); }
+.pv-on[data-pvkind="import"]   > .pv-tick::after { border-right-color: var(--pv-import); }
+.pv-on[data-pvkind="unknown"]  > .pv-tick::after { border-right-color: var(--pv-unknown); }
 .pv-tick:focus-visible { outline: 2px solid var(--navy-2); outline-offset: 1px; }
 
 /* Grid labels have no box of their own; give the tick room beside the text. */
 .tri-grid > .lbl.pv-on { padding-right: 12px; }
+/* Market Rents tab (Screener): table cells and the header fact chips. */
+td.pv-on { padding-right: 10px; }
+.sc-facts > span.pv-on, .sc-name.pv-on { padding-right: 10px; }
 /* Phones: a bigger target. */
 @media (pointer: coarse) {
   .pv-tick { width: 22px; height: 22px; }
@@ -99,6 +109,9 @@
 #pv-pop .pv-computed .pv-chip { background: var(--pv-computed); }
 #pv-pop .pv-differs  .pv-chip { background: var(--pv-differs); }
 #pv-pop .pv-edited   .pv-chip { background: #64748b; }
+#pv-pop .pv-entered  .pv-chip { background: #64748b; }
+#pv-pop .pv-import   .pv-chip { background: var(--pv-import); }
+#pv-pop .pv-unknown  .pv-chip { background: #94a3b8; }
 
 #pv-pop .pv-r {
   display: grid;

@@ -94,6 +94,7 @@ function pvRentRec(e) {
 function pvKind(r) {
   if (!r) return '';
   if (r.edited) return 'edited';
+  if (r.kind === 'import' || r.kind === 'unknown' || r.kind === 'entered') return r.kind;
   if (r.differs) return 'differs';
   if (r.source === 'computed' || r.computed_at) return 'computed';
   return r.looked_up_at ? 'ok' : 'untimed';
@@ -255,6 +256,24 @@ function pvApplyComp(c, jc, bandIdx, stats) {
     c.prov[key] = r;
     stats.values++;
   });
+  /* Values the workbook DERIVES from looked-up ones. The populator turns a
+     concession in months into dollars (months x the comp's average asking rent),
+     and the backfill sets the row-4 W/D and Utilities cells by formula over the
+     band rows it filled. Trace them to their inputs rather than leave them bare. */
+  if (!c.prov.concession_amount && c.prov.concession_months && c.concession_amount !== '' && c.concession_amount != null) {
+    c.prov.concession_amount = Object.assign({}, c.prov.concession_months, {
+      basis: "concession months converted to dollars by the populator (months x the comp's average asking rent)",
+    });
+    delete c.prov.concession_amount.differs;
+  }
+  if ((jc.backfill_runs || []).length) {
+    ['wd_type', 'util_structure'].forEach(k => {
+      if (!c.prov[k] && c[k] !== '' && c[k] != null) {
+        c.prov[k] = { source: 'computed', computed_at: (jc.backfill_runs[jc.backfill_runs.length - 1] || {}).run_at || '',
+          detail: 'COMPS row-4 formula over the ' + (k === 'wd_type' ? 'W/D' : 'utility') + ' rows of the attribute band (set by the backfill)' };
+      }
+    });
+  }
   // Fill only what the workbook has no cell for.
   if (!c.website && fields.website && fields.website.value) c.website = String(fields.website.value);
   if (!c.hellodata_id && jc.hellodata_id) c.hellodata_id = String(jc.hellodata_id);
@@ -269,10 +288,10 @@ function pvApplyComp(c, jc, bandIdx, stats) {
       if (!e) { delete r.prov; return; }
       const rent = pvRentRec(e) || Object.assign({}, base);
       if (e.rent != null && r.ask_rent !== '' && r.ask_rent != null && !pvSame(e.rent, r.ask_rent)) rent.differs = { file: e.rent };
-      /* Rent only. SF / # Units / plan all share the unit mix's one source
-         (shown in this card's "How" line); ticking all four on every plan row
-         was noise. The rent is the value whose source varies plan by plan. */
-      r.prov = { ask_rent: rent };
+      /* Every filled field gets a card (Elan, 2026-11-19). Plan, SF and # Units
+         share the unit mix's one listing source; the rent carries its own,
+         because that is the value whose source varies plan by plan. */
+      r.prov = { ask_rent: rent, plan: Object.assign({}, base), sqft: Object.assign({}, base), count: Object.assign({}, base) };
       stats.values++;
       stats.units++;
     });
@@ -456,7 +475,15 @@ function pvInstallImportHooks() {
       renderPhase1();
       return;
     }
+    const stampOf = k => (STATE.imports && STATE.imports[k] && STATE.imports[k].importedAt) || '';
+    const before = { comps: stampOf('comps'), unitMix: stampOf('unitMix') };
     const out = innerApply.apply(this, arguments);
+    /* Stamp what this import brought in, so a source card can later tell an
+       imported comp / plan row from one added by hand. */
+    let stamped = false;
+    if (stampOf('comps') && stampOf('comps') !== before.comps) { (STATE.comps || []).forEach(c => { c.origin = 'proforma'; }); stamped = true; }
+    if (stampOf('unitMix') && stampOf('unitMix') !== before.unitMix) { (STATE.subjectUnitMix || []).forEach(r => { r.origin = 'proforma'; }); stamped = true; }
+    if (stamped && !res) saveState();
     if (res && PF.step !== 'preview') {        // the import really applied (not the confirm step)
       const st = pvApply(res);
       saveState();
@@ -472,19 +499,96 @@ function pvInstallImportHooks() {
 /** Where the record for a control lives: {holder, key} or null. */
 function pvLocate(path, key) {
   if (!STATE || !path) return null;
-  if (path === 'subject') return { holder: STATE.subject, key };
+  if (path === 'subject') return { holder: STATE.subject, key, kind: 'subject', field: key };
   let m = /^subject\.(physical|amenities|fees)$/.exec(path);
-  if (m) return { holder: STATE.subject, key: m[1] + '.' + key };
+  if (m) return { holder: STATE.subject, key: m[1] + '.' + key, kind: 'subject', bag: m[1], field: key };
   m = /^comp:([^.:]+)(?:\.(\w+))?$/.exec(path);
   if (m) {
     const c = getComp(m[1]);
-    return c ? { holder: c, key: m[2] ? m[2] + '.' + key : key } : null;
+    return c ? { holder: c, key: m[2] ? m[2] + '.' + key : key, kind: 'comp', comp: c, bag: m[2] || '', field: key } : null;
   }
-  if (/^unit:/.test(path)) {
+  m = /^unit:(subject|comp:([^:]+)):([^:]+)$/.exec(path);
+  if (m) {
     const r = resolveUnitFieldTarget(path);
-    return r ? { holder: r, key } : null;
+    if (!r) return null;
+    return m[1] === 'subject'
+      ? { holder: r, key, kind: 'subjunit', field: key }
+      : { holder: r, key, kind: 'compunit', comp: getComp(m[2]), field: key };
   }
   return null;
+}
+
+/* ------------------------------------------------- fallback: no explicit record
+   A filled field with no results-file record still gets a card that says where
+   the value came from, as far as the record itself can tell — and says so
+   plainly when it cannot. "From the proforma" is claimed only for the fields the
+   importer actually writes (proforma-import.js pfToImport / pfApply), and only
+   for objects that came in with an import. */
+const PV_IMPORT_FIELDS = {
+  subject: ['name', 'address', 'city', 'state', 'zip', 'msa', 'year_built', 'total_units',
+    'occupancy_pct', 'wd_type', 'util_structure'],
+  comp: ['name', 'address', 'city', 'state', 'zip', 'category', 'year_built', 'total_units',
+    'distance_miles', 'vacancy_pct', 'concession_amount', 'concession_months', 'wd_type',
+    'util_structure', 'source', 'notes'],
+  compunit: ['plan', 'beds', 'baths', 'sqft', 'count', 'ask_rent', 'occ_pct'],
+  subjunit: ['plan', 'beds', 'baths', 'sqft', 'count', 'vacant_count', 'current_rent', 'status'],
+};
+const PV_IMPORT_TAB = { subject: 'COMPS / DASH tabs', comp: 'COMPS tab', compunit: 'COMPS tab (comp unit rows)', subjunit: 'RR tab' };
+
+function pvImportRec(rec, where, detail) {
+  return {
+    kind: 'import', source: 'Proforma — ' + where, file: rec.fileName || '',
+    imported_at: rec.importedAt || '', imported_by: rec.importedBy || '',
+    detail: detail || '',
+  };
+}
+
+/** Did this comp / subject row arrive with the recorded import? New imports stamp
+    `origin`; records loaded before the stamp existed fall back to a count check. */
+function pvFromImport(kind, obj, comp) {
+  const imp = STATE.imports || {};
+  if (kind === 'comp' || kind === 'compunit') {
+    if (comp && comp.origin) return comp.origin === 'proforma' && imp.comps ? imp.comps : null;
+    return imp.comps && imp.comps.comps === (STATE.comps || []).length ? imp.comps : null;
+  }
+  if (kind === 'subjunit') {
+    if (obj && obj.origin) return obj.origin === 'proforma' && imp.unitMix ? imp.unitMix : null;
+    return imp.unitMix && imp.unitMix.rows === (STATE.subjectUnitMix || []).length ? imp.unitMix : null;
+  }
+  return null;
+}
+
+function pvFallback(loc) {
+  if (!loc) return null;
+  const imp = STATE.imports || {};
+  const f = loc.field;
+  // Per-plan market rent: the Screener records whether it was seeded or typed.
+  if (loc.kind === 'subjunit' && f === 'market_rent') {
+    const r = loc.holder;
+    if (r.market_rent_src === 'user') return { kind: 'entered', source: 'Entered in the tracker (Market Rents tab)', detail: 'typed before edit times were recorded' };
+    const src = imp.marketRents || imp.unitMix;
+    return src ? pvImportRec(src, 'COMPS column G', 'seeded from the proforma\'s market rent for this plan') : null;
+  }
+  if (loc.bag) {                                   // attribute band / fees
+    if (loc.kind === 'comp') {
+      const rec = pvFromImport('comp', null, loc.comp);
+      if (rec) return pvImportRec(rec, 'COMPS tab (attribute band)');
+    } else if (imp.subject) {
+      return pvImportRec(imp.subject, 'COMPS tab (subject attribute band)');
+    }
+  } else if (loc.kind === 'subject') {
+    if (imp.subject && PV_IMPORT_FIELDS.subject.includes(f)) return pvImportRec(imp.subject, PV_IMPORT_TAB.subject);
+  } else {
+    const rec = pvFromImport(loc.kind, loc.holder, loc.comp);
+    if (rec && (PV_IMPORT_FIELDS[loc.kind] || []).includes(f)) return pvImportRec(rec, PV_IMPORT_TAB[loc.kind]);
+  }
+  return { kind: 'unknown', source: 'Not recorded', detail: 'typed in by hand, or captured before sources were tracked' };
+}
+
+/** A value worth a card: not blank, not a placeholder dash or dot. */
+function pvFilled(v) {
+  const s = String(v == null ? '' : v).trim();
+  return s !== '' && s !== '—' && s !== '·' && s !== '-';
 }
 
 function pvRecFor(loc) {
@@ -493,33 +597,30 @@ function pvRecFor(loc) {
 
 /** A hand edit replaces the looked-up record, keeping what it was. */
 function pvMarkEdited(loc) {
-  const was = pvRecFor(loc);
-  if (!was) return false;
+  if (!loc || !loc.holder) return false;
+  /* Every hand edit is recorded, not only edits over a looked-up value: a field
+     typed in the tracker is a source too ("Entered by X on <date>"). `was` keeps
+     whatever the field could be traced to before — the results-file record, or
+     the import / not-recorded fallback. */
+  const was = pvRecFor(loc) || pvFallback(loc);
   const by = pvEmail();
-  loc.holder.prov[loc.key] = was.edited
+  loc.holder.prov = loc.holder.prov || {};
+  loc.holder.prov[loc.key] = was && was.edited
     ? Object.assign({}, was, { edited_at: nowISO(), edited_by: by || was.edited_by })
-    : { source: 'Edited in Rent Comps Tracker', edited: true, edited_at: nowISO(), edited_by: by, was };
+    : { source: 'Edited in Rent Comps Tracker', edited: true, edited_at: nowISO(), edited_by: by,
+        was: was && was.kind !== 'unknown' ? was : undefined };
   return true;
-}
-
-function pvScreenerRow(tr) {
-  if (!tr || !STATE) return null;
-  const tds = tr.querySelectorAll('td');
-  if (tds.length < 2) return null;
-  const plan = pvNorm((tds[0].childNodes[0] || {}).textContent || '');
-  const status = pvNorm(tds[1].textContent);
-  return (STATE.subjectUnitMix || []).find(r => pvNorm(r.plan) === plan && pvNorm(r.status) === status)
-    || (STATE.subjectUnitMix || []).find(r => pvNorm(r.plan) === plan) || null;
 }
 
 function pvOnEdit(ev) {
   const t = ev.target;
+  if (!t || !t.closest) return;
   let loc = null;
-  const field = t.closest && t.closest('[data-fpath][data-fkey]');
-  const tri = t.closest && t.closest('.tri[data-tri] button[data-triv]');
-  const mr = t.closest && t.closest('[data-mroverride]');
-  const sc = t.closest && t.closest('[data-scmkt]');
-  const cat = t.closest && t.closest('.cat-picker button[data-cat]');
+  const field = t.closest('[data-fpath][data-fkey]');
+  const tri = t.closest('.tri[data-tri] button[data-triv]');
+  const mr = t.closest('[data-mroverride]');
+  const tagged = t.closest('[data-pvpath][data-pvkey]');     // Screener cells
+  const cat = t.closest('.cat-picker button[data-cat]');
   if (cat) {
     loc = pvLocate(cat.closest('.cat-picker').getAttribute('data-catpicker'), 'category');
   } else if (tri) {
@@ -529,18 +630,21 @@ function pvOnEdit(ev) {
     loc = pvLocate(field.getAttribute('data-fpath'), field.getAttribute('data-fkey'));
   } else if (mr && ev.type === 'change') {
     const b = STATE.marketRents[mr.getAttribute('data-mroverride')];
-    loc = b ? { holder: { prov: b.prov ? { v: b.prov } : null }, key: 'v', bucket: b } : null;
-    if (loc && pvRecFor(loc)) { pvMarkEdited(loc); b.prov = loc.holder.prov.v; saveState(); pvSchedule(); }
+    if (!b) return;
+    const holder = { prov: b.prov ? { v: b.prov } : {} };
+    setTimeout(() => { pvMarkEdited({ holder, key: 'v' }); b.prov = holder.prov.v; saveState(); pvSchedule(); }, 0);
     return;
-  } else if (sc && ev.type === 'change') {
-    const row = pvScreenerRow(sc.closest('tr'));
-    if (row) {
-      const plan = pvNorm(row.plan);
-      let any = false;
+  } else if (tagged && ev.type === 'change' && tagged.getAttribute('data-pvkey') === 'market_rent') {
+    /* The Screener writes one market rent onto every row of the plan
+       (setMarketForPlan), so every one of those rows gets the edit record. */
+    const l = pvLocate(tagged.getAttribute('data-pvpath'), 'market_rent');
+    if (!l) return;
+    const plan = pvNorm(l.holder.plan);
+    setTimeout(() => {
       (STATE.subjectUnitMix || []).filter(r => pvNorm(r.plan) === plan)
-        .forEach(r => { if (pvMarkEdited({ holder: r, key: 'market_rent' })) any = true; });
-      if (any) { saveState(); pvSchedule(); }
-    }
+        .forEach(r => pvMarkEdited({ holder: r, key: 'market_rent', kind: 'subjunit', field: 'market_rent' }));
+      saveState(); pvSchedule();
+    }, 0);
     return;
   }
   if (!loc) return;
@@ -553,6 +657,7 @@ function pvOnEdit(ev) {
 const PV_KIND_LABEL = {
   ok: 'Looked up', untimed: 'No lookup time', computed: 'Computed',
   edited: 'Edited in the tracker', differs: 'Changed since the run',
+  import: 'From the proforma', unknown: 'Source not recorded', entered: 'Entered in the tracker',
 };
 
 /** "Nov 17, 2026, 1:42 PM" — date-only strings stay date-only (no UTC shift). */
@@ -584,6 +689,8 @@ function pvCardHtml(r, now) {
   const kind = pvKind(r);
   const parts = [];
   parts.push(`<div class="pv-h pv-${kind}"><span class="pv-chip">${esc(PV_KIND_LABEL[kind] || 'Source')}</span></div>`);
+  // A long text answer is cut to one line in the Screener; show it whole here.
+  if (typeof now === 'string' && now.trim().length > 14) parts.push(pvRow('Value', esc(now.trim())));
   if (r.edited) {
     parts.push(pvRow('By', esc(r.edited_by || 'someone')));
     parts.push(pvRow('When', esc(pvWhen(r.edited_at)) + (pvAgo(r.edited_at) ? ` <span class="pv-ago">${esc(pvAgo(r.edited_at))}</span>` : '')));
@@ -591,9 +698,20 @@ function pvCardHtml(r, now) {
       const w = r.was;
       parts.push(`<div class="pv-sep">Before the edit</div>`);
       parts.push(pvRow('Source', esc(w.source || '')));
+      if (w.file) parts.push(pvRow('File', esc(w.file)));
+      if (w.imported_at) parts.push(pvRow('Imported', esc(pvWhen(w.imported_at))));
       if (w.looked_up_at || w.computed_at) parts.push(pvRow(w.computed_at ? 'Computed' : 'Looked up', esc(pvWhen(w.looked_up_at || w.computed_at))));
       if (w.url) parts.push(pvRow('Link', `<a href="${esc(w.url)}" target="_blank" rel="noopener">${esc(pvHost(w.url))} ↗</a>`));
     }
+    return parts.join('');
+  }
+  if (kind === 'import' || kind === 'unknown' || kind === 'entered') {
+    parts.push(pvRow('Source', esc(r.source || '—')));
+    if (r.file) parts.push(pvRow('File', esc(r.file)));
+    if (r.imported_at) parts.push(pvRow('Imported', esc(pvWhen(r.imported_at)) + (pvAgo(r.imported_at) ? ` <span class="pv-ago">${esc(pvAgo(r.imported_at))}</span>` : '')));
+    if (r.imported_by) parts.push(pvRow('By', esc(r.imported_by)));
+    if (r.detail) parts.push(pvRow(kind === 'import' ? 'How' : 'Note', esc(r.detail)));
+    if (kind === 'import') parts.push(`<div class="pv-note">No results file covers this value, so the card can say which proforma it came from, not when the underlying fact was looked up.</div>`);
     return parts.join('');
   }
   const computed = kind === 'computed';
@@ -675,6 +793,9 @@ function pvMark(container, kind, payload) {
      into the card instead. */
   const lbl = container.querySelector(':scope > label[title], :scope > .lbl[title]');
   if (lbl) { container.__pvNote = lbl.getAttribute('title'); lbl.removeAttribute('title'); }
+  // The Screener's capped text answer carries its full text as a title; the card shows it.
+  const txt = container.querySelector(':scope > .sc-txt[title]');
+  if (txt) txt.removeAttribute('title');
 }
 
 function pvUnmark(container) {
@@ -696,12 +817,17 @@ function pvDecorate() {
     pvMark(container, pvKind(rec), { rec, now });
   };
 
+  /* Explicit record first (results file, or a tracked hand edit); for any other
+     FILLED field, the fallback (proforma import / market-rent seed / not
+     recorded). Blank fields get no tick. */
+  const recOf = (loc, now) => pvRecFor(loc) || (pvFilled(now) ? pvFallback(loc) : null);
+
   // Text / number / select fields (.field) and the attribute grids (.lbl + control).
   host.querySelectorAll('[data-fpath][data-fkey]').forEach(el => {
     const loc = pvLocate(el.getAttribute('data-fpath'), el.getAttribute('data-fkey'));
-    const rec = pvRecFor(loc);
-    if (!rec) return;
     const now = el.value;
+    const rec = recOf(loc, now);
+    if (!rec) return;
     const fieldBox = el.closest('.field');
     if (fieldBox) { mark(fieldBox, rec, now); return; }
     const cell = el.closest('.fee-cell') || el;
@@ -709,22 +835,35 @@ function pvDecorate() {
   });
   host.querySelectorAll('.tri[data-tri]').forEach(w => {
     const loc = pvLocate(w.getAttribute('data-tri'), w.getAttribute('data-trikey'));
-    const rec = pvRecFor(loc);
-    if (!rec) return;
     const now = (w.querySelector('button.on-y') && 'Y') || (w.querySelector('button.on-n') && 'N') || '';
+    const rec = recOf(loc, now);
+    if (!rec) return;
     const lbl = w.previousElementSibling;
     mark(lbl && lbl.classList.contains('lbl') ? lbl : w, rec, now);
   });
-  // Tab 3 — bucket market rents.
+  // The comp-type picker (Direct / Aspirational / Inferior).
+  host.querySelectorAll('.cat-picker[data-catpicker]').forEach(w => {
+    const loc = pvLocate(w.getAttribute('data-catpicker'), 'category');
+    const now = loc && loc.holder ? loc.holder.category : '';
+    const rec = recOf(loc, now);
+    if (rec) mark(w.closest('.field') || w, rec, now);
+  });
+  // Old tab-3 table (only when the Screener is not loaded) — bucket market rents.
   host.querySelectorAll('[data-mroverride]').forEach(inp => {
     const b = STATE.marketRents[inp.getAttribute('data-mroverride')];
-    if (b && b.prov) mark(inp.closest('td') || inp, b.prov, inp.value);
-  });
-  // Screener — per-plan market rents.
-  host.querySelectorAll('[data-scmkt]').forEach(inp => {
-    const row = pvScreenerRow(inp.closest('tr'));
-    const rec = row && row.prov && row.prov.market_rent;
+    const imp = STATE.imports && STATE.imports.marketRents;
+    const rec = (b && b.prov) || (pvFilled(inp.value) && imp ? pvImportRec(imp, 'COMPS column G') : null);
     if (rec) mark(inp.closest('td') || inp, rec, inp.value);
+  });
+  // Tagged display cells — the Screener (Market Rents tab): subject and comp
+  // facts, both unit-mix tables, the market rent inputs, the attribute panels.
+  host.querySelectorAll('[data-pvpath][data-pvkey]').forEach(el => {
+    const loc = pvLocate(el.getAttribute('data-pvpath'), el.getAttribute('data-pvkey'));
+    if (!loc) return;
+    const inp = el.querySelector('input');
+    const now = inp ? inp.value : (loc.bag ? (loc.holder[loc.bag] || {})[loc.field] : loc.holder[loc.field]);
+    const rec = recOf(loc, now);
+    if (rec) mark(el, rec, now);
   });
   // Comp score chips — comp list cards and the comp editor head.
   host.querySelectorAll('[data-compcard] > .card-head, #comp-editor > .card-head').forEach(head => {
