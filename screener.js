@@ -40,19 +40,17 @@
   const PICTURES_FOLDER = '11. Pictures';
   const VISIBLE_ROWS = 9;          // COMPS section capacity; scroll past it
 
-  /* KEY ATTRIBUTES — the fields shown first, in one block above the full
-     Physical / Amenities / Fees panels. Seeded 2026-11-19 from Claude's
-     suggestion in `Market Rents - Attribute Priority v1.xlsx` (APPLETS/Rent
-     Comps Tracker); column K of that file is the owner's call, and when it comes
-     back edited, this list is what changes. Keys, not labels; schema order wins
-     over the order written here. The same keys exist in both families. */
+  /* KEY ATTRIBUTES — the fields shown first, above the other Physical /
+     Amenities fields. THE OWNER'S LIST (2026-11-19): column K = Y in
+     `Market Rents - Attribute Priority v2.xlsx` (APPLETS/Rent Comps Tracker),
+     20 fields. Change it there first, then here. Keys, not labels; schema order
+     wins over the order written here. The same keys exist in both families. */
   const PRIMARY = {
-    physical: ['property_type', 'renovated_year', 'renovated_scope', 'wd_inunit',
-      'wd_hookups', 'specials'],
-    amenities: ['gated', 'pool', 'fitness_center', 'clubhouse', 'dog_park',
-      'covered_parking', 'attached_garages', 'patio_balcony',
-      'stainless_steel_appliances', 'granite_stone_countertops', 'hardwood_floors',
-      'all_bills_paid', 'valet_trash'],
+    physical: ['property_type', 'hvac_indiv', 'wd_hookups', 'roof_type', 'specials'],
+    amenities: ['num_common_laundry_rms', 'dog_park', 'fitness_center', 'pool',
+      'attached_garages', 'covered_parking', 'hardwood_floors', 'patio_balcony',
+      'granite_stone_countertops', 'stainless_steel_appliances', 'valet_trash',
+      'all_bills_paid', 'gated', 'courtesy_patrol', 'large_pets'],
   };
   /* FEES are not in PRIMARY: every COMPS fee is always shown, as its own strip
      at the top of the key block (owner, 2026-11-19), even when blank. */
