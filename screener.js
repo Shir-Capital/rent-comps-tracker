@@ -55,19 +55,15 @@
   /* FEES are not in PRIMARY: every COMPS fee is always shown, as its own strip
      at the top of the key block (owner, 2026-11-19), even when blank. */
 
-  /* DUPLICATE PAIRS — the COMPS band asks three questions twice, once under
-     Physical and once under Amenities. The Screener shows ONE row per pair
-     (the Physical one); its value is the Physical answer, else the Amenities
-     answer, and a pair that disagrees shows both, flagged. The record and the
-     export are untouched: both rows still exist on the template until the
-     "SHIR_MF_Template- Nov Update 2" session retires the Amenities rows. */
-  const MERGED = [
-    { keep: 'wd_inunit', drop: 'w_d_provided' },
-    { keep: 'wd_hookups', drop: 'w_d_connections' },
-    { keep: 'priv_yards', drop: 'private_yards' },
-  ];
-  const MERGED_DROP = MERGED.map(m => m.drop);
-  function amenitiesShown() { return AMENITIES.filter(it => MERGED_DROP.indexOf(it.key) === -1); }
+  /* DUPLICATE PAIRS — RETIRED with the rows (MF v73 / ExStay v69, 2026-11-19).
+     The band used to ask Priv. Yards / W/D Hookups / W/D In-Unit twice, once
+     under Amenities too, and this tab folded each pair for display only. The
+     template has since retired the Amenities rows, and core.js
+     foldRetiredAttrs() now folds stored answers into the Physical key on load,
+     so there is nothing left to merge here. A pair that DISAGREED keeps the
+     Physical answer and records the other in `retired_conflicts`; it is still
+     shown both ways, flagged (attrSource below), until someone edits it. */
+  function amenitiesShown() { return AMENITIES; }
 
   /* Per-browser show / hide switches. Storage failing just means "shown". */
   const OTHER_KEY = 'rct.screener.showOther';
@@ -555,15 +551,16 @@
       ? '<span class="src" title="Nothing recorded for the subject yet — fill it on tab 1, or import it from the proforma">not captured</span>'
       : '';
     const A = (who && who.amenities) || {};
-    /* Fold each duplicate pair into its Physical row. `from` records which
-       group supplied the shown value, so the source card points at it. */
+    /* A retired Amenities answer that disagreed with its Physical twin when
+       foldRetiredAttrs() ran: show both, flagged, while the Physical answer is
+       still the one that was kept. `from` stays empty now that no value is
+       borrowed from another group; physPath() keeps reading it for safety. */
     const PM = Object.assign({}, P), from = {}, clash = {};
-    const blank = v => v === '' || v == null;
-    MERGED.forEach(m => {
-      const a = P[m.keep], b = A[m.drop];
-      if (blank(a) && !blank(b)) { PM[m.keep] = b; from[m.keep] = 'amenities:' + m.drop; }
-      else if (!blank(a) && !blank(b) && String(a).trim().toUpperCase() !== String(b).trim().toUpperCase()) {
-        clash[m.keep] = { a, b };
+    const rc = (who && who.retired_conflicts) || {};
+    Object.keys(rc).forEach(k => {
+      const x = rc[k] || {};
+      if (String(P[k] == null ? '' : P[k]).trim().toUpperCase() === String(x.kept == null ? '' : x.kept).trim().toUpperCase()) {
+        clash[k] = { a: P[k], b: x.value, label: x.label };
       }
     });
     return {
@@ -581,7 +578,8 @@
   function physGlyph(d, key) {
     const c = d.clash[key];
     if (!c) return triGlyph(d.P[key]);
-    const t = 'Physical says ' + c.a + ', Amenities says ' + c.b;
+    const t = 'Physical says ' + c.a + '; the retired Amenities row "' + (c.label || 'Amenities') + '" said ' + c.b +
+      '. Physical is kept: edit the value to clear this.';
     return '<span class="sc-txt sc-clash" title="' + esc(t) + '">' + esc(c.a + ' / ' + c.b) + '</span>';
   }
 
@@ -855,6 +853,6 @@
   window.SCREENER = {
     compsWithBucket, anchorRowFor, marketOf, setMarketForPlan,
     syncBucketOverride, bucketRollup, proformaSeed, sanitizeFolderName,
-    primary: PRIMARY, merged: MERGED, state: SC,
+    primary: PRIMARY, retired: SCHEMA.retiredAmenities || [], state: SC,
   };
 })();

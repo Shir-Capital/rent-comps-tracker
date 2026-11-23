@@ -66,6 +66,27 @@ function pxSubtotalRows() {
   return rows;
 }
 
+/* THE ATTRIBUTE BAND OF THE WORKBOOK BEING TARGETED (2026-11-19).
+   MF v73 / ExStay v69 re-ordered the Physical / Amenities band ('Key
+   Attributes' first, three Amenities rows retired) and the schema now carries
+   those rows. Most pipeline deals are still on v72 or older, whose band has the
+   SAME labels on DIFFERENT rows. So in aligned mode every field's row, and the
+   band bounds pxIsWritable() checks, come from the target workbook BY LABEL
+   (pxReadBand); in generic mode (no workbook picked) they are the schema's,
+   i.e. a v73 / v69 layout. Set by pxBuildMirror and pxBuildWorkbook, the two
+   places that call pxIsWritable, so the writer and the self-check agree. */
+let PX_BAND = null;
+function pxBounds() {
+  if (PX_BAND) return PX_BAND;
+  return { physFirst: TAB.physRowFirst, physLast: TAB.physRowLast,
+           amenFirst: TAB.amenRowFirst, amenLast: TAB.amenRowLast };
+}
+/** The row a band item lands on: the target's, by label, else the schema's. */
+function pxAttrRow(kind, item) {
+  if (PX_BAND) return PX_BAND[kind][item.key] || null;
+  return item.row;
+}
+
 function pxBaseFor(col) {
   const bases = TAB.compBaseCols || [];
   const w = TAB.compBlockWidth || 9;
@@ -106,8 +127,9 @@ function pxIsWritable(row, col) {
        and build_schema.py refuses a map that would point at them. */
     const sac = TAB.subjectAttrCols || {};
     const sIs = name => (sw.attr || []).indexOf(name) !== -1 && sac[name] === col;
-    if (row >= TAB.physRowFirst && row <= TAB.physRowLast && sIs('physicalValue')) return true;
-    if (row >= TAB.amenRowFirst && row <= TAB.amenRowLast && sIs('amenityValue')) return true;
+    const bb = pxBounds();
+    if (row >= bb.physFirst && row <= bb.physLast && sIs('physicalValue')) return true;
+    if (row >= bb.amenFirst && row <= bb.amenLast && sIs('amenityValue')) return true;
     if (row >= TAB.feeRowFirst && row <= TAB.feeRowLast && (sIs('feeLabel') || sIs('feeValue'))) return true;
     return false;                                         // B array formula, C/D/F/H computed
   }
@@ -137,8 +159,9 @@ function pxIsWritable(row, col) {
      span is exactly the assumption that broke populate_comps-v43 against this
      template. The bands overlap in row-space by design; the column offset
      (isOff) is what actually disambiguates which field a cell belongs to. */
-  const inPhys = row >= TAB.physRowFirst && row <= TAB.physRowLast && isOff('attr', 'physicalValue');
-  const inAmen = row >= TAB.amenRowFirst && row <= TAB.amenRowLast && isOff('attr', 'amenityValue');
+  const bnd = pxBounds();
+  const inPhys = row >= bnd.physFirst && row <= bnd.physLast && isOff('attr', 'physicalValue');
+  const inAmen = row >= bnd.amenFirst && row <= bnd.amenLast && isOff('attr', 'amenityValue');
   const inFee = row >= TAB.feeRowFirst && row <= TAB.feeRowLast &&
     (isOff('attr', 'feeLabel') || isOff('attr', 'feeValue'));
   if (inPhys || inAmen || inFee) return true;
@@ -164,6 +187,20 @@ function pxBuildMirror(tgt) {
   const stats = { comps: 0, unitRows: 0, fees: 0, planRents: 0, cells: 0, subjectAttrs: 0, subjectFees: 0 };
   const off = TAB.offsets || {};
   const s = STATE.subject || {};
+  PX_BAND = tgt && tgt.band ? tgt.band : null;
+
+  /* One band value. Its row is the target workbook's (by label) in aligned
+     mode, the schema's in generic mode. A field the target's band does not
+     carry is skipped and counted, never guessed onto a neighbouring row. */
+  const noRow = {};
+  const putAttr = (kind, item, col, v, who) => {
+    const row = pxAttrRow(kind, item);
+    if (!row) {
+      if (v !== '' && v != null) noRow[item.label] = (noRow[item.label] || 0) + 1;
+      return;
+    }
+    put(row, col, v, who, item.label);
+  };
 
   /* The one gate every value passes through. Refusing '' is not defensive
      tidiness: skip-blanks treats an empty string as a value, so a single ''
@@ -287,12 +324,13 @@ function pxBuildMirror(tgt) {
      is a number, and a blank stays blank and is therefore skipped: skip-blanks
      leaves whatever the workbook already holds. Stories falls back to the
      basics' Stories when the band value is blank (subjectPhysicalValue). Rows
-     are the schema's, which verify_against_template.py label-checks at B / D. */
+     are the target workbook's by label in aligned mode (pxAttrRow), else the
+     schema's, which verify_against_template.py label-checks at B / D. */
   const sac = TAB.subjectAttrCols;
   if (sac && ((PX_MAP.subjectWritable || {}).attr || []).length) {
     const before = Object.keys(cells).length;
-    PHYSICAL.forEach(pa => put(pa.row, sac.physicalValue, attrOut(pa, subjectPhysicalValue(pa, s)), 'Subject', pa.label));
-    AMENITIES.forEach(am => put(am.row, sac.amenityValue, attrOut(am, (s.amenities || {})[am.key]), 'Subject', am.label));
+    PHYSICAL.forEach(pa => putAttr('physical', pa, sac.physicalValue, attrOut(pa, subjectPhysicalValue(pa, s)), 'Subject'));
+    AMENITIES.forEach(am => putAttr('amenities', am, sac.amenityValue, attrOut(am, (s.amenities || {})[am.key]), 'Subject'));
     stats.subjectAttrs = Object.keys(cells).length - before;
     const sf = putFees(s.fees || {}, tgt ? (tgt.subjectFeeLabels || {}) : null, sac.feeLabel, sac.feeValue, 'Subject');
     stats.subjectFees = sf.placed;
@@ -398,8 +436,8 @@ function pxBuildMirror(tgt) {
        had quietly become dead and pools would have gone back to writing 'Y' into
        a count column. One helper now, shared with the Cell Map and the HelloData
        fill, so the three cannot disagree again. */
-    PHYSICAL.forEach(pa => put(pa.row, base + off.physicalValue, attrOut(pa, c.physical[pa.key]), who, pa.label));
-    AMENITIES.forEach(am => put(am.row, base + off.amenityValue, attrOut(am, c.amenities[am.key]), who, am.label));
+    PHYSICAL.forEach(pa => putAttr('physical', pa, base + off.physicalValue, attrOut(pa, c.physical[pa.key]), who));
+    AMENITIES.forEach(am => putAttr('amenities', am, base + off.amenityValue, attrOut(am, c.amenities[am.key]), who));
 
     // ---- FEES: by label, through the shared putFees() ---------------------
     const feeRes = putFees(c.fees, tgt ? (tgt.feeLabels[slot] || {}) : null,
@@ -435,6 +473,13 @@ function pxBuildMirror(tgt) {
       formulaSkips.slice(0, 12).join(', ') + (formulaSkips.length > 12 ? ', …' : ''));
   }
   stats.formulaSkips = formulaSkips.length;
+  const missing = Object.keys(noRow);
+  if (missing.length) {
+    warn.push(missing.length + ' attribute' + (missing.length === 1 ? '' : 's') + ' NOT written because ' +
+      (tgt ? tgt.fileName : 'the template') + '\'s band has no row labelled ' +
+      missing.slice(0, 8).map(l => '"' + l + '"').join(', ') + (missing.length > 8 ? ', …' : ''));
+  }
+  stats.bandMissing = missing.length;
   stats.cells = Object.keys(cells).length;
   return { cells: cells, warn: warn, clears: clears, stats: stats, aligned: !!tgt, tgt: tgt };
 }
@@ -487,6 +532,7 @@ function pxReadTarget(buf, fileName) {
     }
   });
   if (geomErrs.length) throw new Error('COMPS geometry does not match the schema: ' + geomErrs.join('; '));
+  const band = pxReadBand(ws);
 
   const planRows = {};
   const planList = [];
@@ -573,6 +619,49 @@ function pxReadTarget(buf, fileName) {
     planRows: planRows, planList: planList,
     slotNames: slotNames, slotByName: slotByName,
     feeLabels: feeLabels, slotHasData: slotHasData,
+    band: band,
+  };
+}
+
+/**
+ * The target workbook's Physical / Amenities band, BY LABEL (2026-11-19).
+ * Labels are read from the subject block's own label columns, B (Physical) and
+ * D (Amenities); every comp block repeats them on the same rows. Each list
+ * runs from the row under the 'Physical Attributes' header to its first blank
+ * label — the bands are contiguous, which is also what the populator assumes.
+ * A pre-v73 workbook and a v73+ one carry the same labels on different rows,
+ * so this is what lets one tracker paste into either. Rows the template retired
+ * at v73 (W/D Provided ...) are simply never written: no schema item names them.
+ */
+function pxReadBand(ws) {
+  const hdr = TAB.rowAttrHeader;
+  const scan = (col, items) => {
+    const byLabel = {};
+    let first = 0, last = 0;
+    for (let r = hdr + 1; r <= hdr + 90; r++) {
+      const l = pxS(ws, r, col);
+      if (!l) break;
+      if (!first) first = r;
+      last = r;
+      const k = l.toLowerCase();
+      if (!(k in byLabel)) byLabel[k] = r;
+    }
+    const rows = {};
+    items.forEach(it => {
+      const r = byLabel[it.label.trim().toLowerCase()];
+      if (r) rows[it.key] = r;
+    });
+    return { rows: rows, first: first, last: last,
+             keyAttributes: pxS(ws, hdr + 1, col).toLowerCase() === 'key attributes' };
+  };
+  const ph = scan(2, PHYSICAL), am = scan(4, AMENITIES);
+  if (!ph.first || !am.first) {
+    throw new Error('COMPS!B' + (hdr + 1) + ' / D' + (hdr + 1) + ' are blank — this workbook has no attribute band to align to.');
+  }
+  return {
+    physical: ph.rows, amenities: am.rows,
+    physFirst: ph.first, physLast: ph.last, amenFirst: am.first, amenLast: am.last,
+    layout: ph.keyAttributes ? 'key-attributes (v73+ / v69+)' : 'pre-v73',
   };
 }
 
@@ -616,6 +705,10 @@ async function pxBuildWorkbook(mirror) {
   const font = { name: BRAND.font || 'Arial Narrow', size: BRAND.fontSize || 11 };
   const s = STATE.subject || {};
   const lastCol = pxLastCol();
+  /* The self-check below re-runs pxIsWritable over the finished sheet; it must
+     see the same band the mirror was built against. */
+  PX_BAND = mirror.tgt && mirror.tgt.band ? mirror.tgt.band : null;
+  const bb = pxBounds();
 
   // ------------------------------------------------------------- READ ME
   {
@@ -638,10 +731,12 @@ async function pxBuildWorkbook(mirror) {
       + 'Without that tick the paste will destroy the subtotal rows, the Eff. $/Mo columns and column B’s array formula. It is not optional.', true);
     line('IT CANNOT CLEAR', 'A paste can set and overwrite but never empty a cell. If a comp slot already holds data, do the CLEAR FIRST sheet first.', true);
     ws.addRow([]);
-    line('Built against', TAB.templateVersion || 'SHIR_MF_Template_v65');
+    line('Built against', TAB.templateVersion || 'SHIR_MF_Template_v75');
     line('Mode', mirror.aligned
-      ? 'ALIGNED to ' + mirror.tgt.fileName + ' — fee rows and subject plan rows resolved against that workbook'
-      : 'GENERIC — no workbook attached. Per-plan market rents are NOT written and fee labels use the template default rows.');
+      ? 'ALIGNED to ' + mirror.tgt.fileName + ' — fee rows, subject plan rows and every attribute row resolved against that workbook' +
+        (mirror.tgt.band ? ' (attribute band: ' + mirror.tgt.band.layout + ' layout)' : '')
+      : 'GENERIC — no workbook attached. Per-plan market rents are NOT written, fee labels use the template default rows, ' +
+        'and attribute rows are the ' + (TAB.templateVersion || 'current template') + ' layout: attach the deal workbook to paste into a deal on an older template.');
     line('Cells written', String(mirror.stats.cells));
     line('Comps', String(mirror.stats.comps));
     line('Unit rows', String(mirror.stats.unitRows));
@@ -697,10 +792,10 @@ async function pxBuildWorkbook(mirror) {
      end at different rows (224 / 270 / 218; FEES Mandatory sums only 202-206).
      Every number here is illustrative — the code reads TAB, which follows the
      record's family. */
-  ws.getCell(TAB.physRowFirst, 1).value = 'Physical ' + TAB.physRowFirst + '-' + TAB.physRowLast +
-    ' / Amenities ' + TAB.amenRowFirst + '-' + TAB.amenRowLast +
+  ws.getCell(bb.physFirst, 1).value = 'Physical ' + bb.physFirst + '-' + bb.physLast +
+    ' / Amenities ' + bb.amenFirst + '-' + bb.amenLast +
     ' / FEES (Mandatory) ' + TAB.feeRowFirst + '-' + TAB.feeRowLast;
-  const spineLast = Math.max(TAB.physRowLast || 0, TAB.amenRowLast || 0, TAB.feeRowLast || 0);
+  const spineLast = Math.max(bb.physLast || 0, bb.amenLast || 0, TAB.feeRowLast || 0);
   for (let r = 1; r <= spineLast; r++) {
     const c = ws.getCell(r, 1);
     if (c.value != null && r !== 1) c.font = { name: BRAND.font || 'Arial Narrow', size: 9, italic: true, color: { argb: 'FF64748B' } };

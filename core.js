@@ -432,8 +432,60 @@ const WD_TYPE_MIGRATION = {
 function hydrateSubjectBand(s) {
   s.physical = Object.assign(blankPhysical(), s.physical || {});
   s.amenities = Object.assign(blankAmenities(), s.amenities || {});
+  foldRetiredAttrs(s);
   s.fees = Object.assign(blankFees(), s.fees || {});
   return s;
+}
+
+/* RETIRED AMENITY ROWS (MF v73 / ExStay v69, 2026-11-19). The COMPS band used to
+   ask three questions twice — once under Physical, once under Amenities:
+       Priv. Yards / Private Yards · W/D Hookups / W/D Connections ·
+       W/D In-Unit / W/D Provided
+   The template retired the Amenities copies (SCHEMA.retiredAmenities names them
+   and the Physical key each now belongs to). Records saved before that, and
+   imports from pre-v73 workbooks, still carry the Amenities answer. This moves
+   it into the Physical key — ONLY when the Physical answer is blank, so the
+   Physical answer always wins (the same rule as populate_comps-v53's
+   RETIRED_AMENITY_FOLD) — carries its source card along, and deletes the
+   Amenities key so nothing ever exports or pastes it again.
+   A pair that DISAGREES keeps Physical and records the dropped answer in
+   `holder.retired_conflicts[physKey] = {label, value, kept}`; the Market Rents
+   tab shows both, flagged, exactly as its display-only merge used to, for as
+   long as the Physical answer still equals `kept` (an edit resolves it).
+   Nothing is silently lost. Idempotent: a second call finds no retired keys and returns 0.
+   `holder` is a comp or the subject — anything with physical / amenities and an
+   optional `prov` map keyed 'physical.<k>' / 'amenities.<k>'. */
+function foldRetiredAttrs(holder) {
+  if (!holder || !holder.amenities) return 0;
+  const retired = SCHEMA.retiredAmenities || [];
+  const blank = v => v == null || String(v).trim() === '';
+  let n = 0;
+  retired.forEach(r => {
+    if (!Object.prototype.hasOwnProperty.call(holder.amenities, r.key)) return;
+    const v = holder.amenities[r.key];
+    const prov = holder.prov || null;
+    const fromKey = 'amenities.' + r.key, toKey = 'physical.' + r.foldTo;
+    if (!blank(v)) {
+      holder.physical = holder.physical || {};
+      const have = holder.physical[r.foldTo];
+      if (blank(have)) {
+        holder.physical[r.foldTo] = v;
+        if (prov && prov[fromKey] && !prov[toKey]) {
+          prov[toKey] = Object.assign({}, prov[fromKey], {
+            note: ((prov[fromKey].note ? prov[fromKey].note + ' · ' : '') +
+              'Recorded as "' + r.label + '" (Amenities), a row the template retired at MF v73 / ExStay v69'),
+          });
+        }
+        n++;
+      } else if (String(have).trim().toUpperCase() !== String(v).trim().toUpperCase()) {
+        holder.retired_conflicts = holder.retired_conflicts || {};
+        holder.retired_conflicts[r.foldTo] = { label: r.label, value: v, kept: have };
+      }
+    }
+    delete holder.amenities[r.key];
+    if (prov) delete prov[fromKey];
+  });
+  return n;
 }
 
 /* One subject Physical value, as the writers should emit it. `stories` is the
@@ -460,6 +512,7 @@ function hydrateComp(c) {
   if (!Array.isArray(c.unitMix)) c.unitMix = [];
   c.physical = Object.assign(blankPhysical(), c.physical || {});
   c.amenities = Object.assign(blankAmenities(), c.amenities || {});
+  foldRetiredAttrs(c);
   c.fees = Object.assign(blankFees(), c.fees || {});
   if (!c.category) c.category = '';
 

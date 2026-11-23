@@ -652,20 +652,42 @@ function pfReadComps(ws) {
      lives at offset 6 of each comp block and its value at offset 7. */
   const OFF_FEE_LABEL = (TAB.offsets && TAB.offsets.feeLabel != null) ? TAB.offsets.feeLabel : 6;
   const OFF_FEE_VALUE = (TAB.offsets && TAB.offsets.feeValue != null) ? TAB.offsets.feeValue : 7;
-  const schemaBlock = (items, labelCol) => {
+  /* Each field's row is FOUND BY ITS LABEL inside the workbook's own band
+     (2026-11-19). Until then a field was read at its schema row (+ the header
+     offset) and kept only if the label there matched. That was right while one
+     band layout existed. MF v73 / ExStay v69 RE-ORDERED the band (a 'Key
+     Attributes' sub-group first, three Amenities rows retired), and the
+     pipeline is full of deals still on v72 and older: the schema now carries
+     the v73 rows, so the old reader would have skipped every key field on a
+     pre-v73 workbook, and the pre-v73 schema would have skipped them on v73.
+     Labels are unique within each list column and both layouts carry the same
+     label vocabulary, so one map per column reads either generation. The band
+     ends at its first blank label (the bands are contiguous; the populator's
+     resolver makes the same assumption). */
+  const bandLabels = (labelCol) => {
+    const m = {};
+    if (!attrHdr) return m;
+    for (let r = attrHdr + 1; r <= attrHdr + 90; r++) {
+      const l = pfS(pfV(ws, r, labelCol));
+      if (!l) break;
+      const k = l.trim().toLowerCase();
+      if (!(k in m)) m[k] = [r, l];
+    }
+    return m;
+  };
+  const schemaBlock = (items, labelCol, extra) => {
+    const m = bandLabels(labelCol);
     const out = [];
-    items.forEach(it => {
-      const r = it.row + bandDelta;
-      const seen = pfS(pfV(ws, r, labelCol));
-      /* Compare on the label, not the row alone: the offset above is derived
-         from ONE anchor, so a workbook whose band was edited mid-way would
-         otherwise silently shift everything below the edit. */
-      if (seen && seen.trim().toLowerCase() === it.label.trim().toLowerCase()) {
-        out.push([r, seen, it.key]);
-      }
+    items.concat(extra || []).forEach(it => {
+      const hit = m[it.label.trim().toLowerCase()];
+      if (hit) out.push([hit[0], hit[1], it.key]);
     });
     return out;
   };
+  /* The three Amenities rows the template retired at MF v73 / ExStay v69. A
+     pre-v73 workbook still has them; read them under their old keys so
+     pfApplyBand can fold each answer into its Physical key (Physical wins). */
+  const RETIRED_ITEMS = (SCHEMA.retiredAmenities || []).map(r => ({ key: r.key, label: r.label }));
   /* Fees keep the scan — they are matched by label per comp further down, the
      labels are analyst-editable dropdowns, and blank-but-labelable slots are
      normal. Widened from the old 14-row window to the Mandatory band the schema
@@ -679,7 +701,7 @@ function pfReadComps(ws) {
     return out;
   };
   const blocks = attrHdr
-    ? { attrs: schemaBlock(PHYSICAL, S), amens: schemaBlock(AMENITIES, S + 2), fees: feeBlock() }
+    ? { attrs: schemaBlock(PHYSICAL, S), amens: schemaBlock(AMENITIES, S + 2, RETIRED_ITEMS), fees: feeBlock() }
     : { attrs: [], amens: [], fees: [] };
 
   /* The SUBJECT's values in that band (2026-11-17). The label blocks above were
@@ -900,7 +922,11 @@ function pfMatchFee(label) {
    placed. This is the body that used to sit inline in pfToImport's comp loop. */
 function pfApplyBand(target, raw, notes) {
   const byKey = (items) => items.reduce((a, it) => { a[it.key] = it; return a; }, {});
-  const physByKey = byKey(PHYSICAL), amenByKey = byKey(AMENITIES);
+  const physByKey = byKey(PHYSICAL);
+  /* + the retired Amenities rows (pre-v73 workbooks), read as tri-state under
+     their old keys and folded into Physical at the end of this function. */
+  const amenByKey = byKey(AMENITIES.concat((SCHEMA.retiredAmenities || [])
+    .map(r => ({ key: r.key, label: r.label, type: 'tri' }))));
   const readAttr = (bag, lookup, lbl, val, key) => {
     const it = lookup[key];
     if (!it) return;
@@ -924,6 +950,9 @@ function pfApplyBand(target, raw, notes) {
   };
   (raw.attrs || []).forEach(([lbl, val, key]) => readAttr(target.physical, physByKey, lbl, val, key));
   (raw.amens || []).forEach(([lbl, val, key]) => readAttr(target.amenities, amenByKey, lbl, val, key));
+  /* Physical was read first, so the fold leaves any Physical answer in place
+     and records a disagreeing retired answer in target.retired_conflicts. */
+  foldRetiredAttrs(target);
   /* Fees are matched BY LABEL, per comp. The band's row order is not a
      contract: v8 made these cells dropdowns and dropped five of the eight v7
      defaults, and analysts free-type per comp — in this very file, comp 2 has
@@ -1526,6 +1555,11 @@ function pfApply() {
       });
     });
     if (Array.isArray(p.subjectBand.fees.unmatched)) STATE.subject.fees.unmatched = p.subjectBand.fees.unmatched.slice();
+    /* A retired Amenities answer (pre-v73 workbook) that disagreed with its
+       Physical twin: kept beside the record so the Market Rents tab flags it. */
+    if (p.subjectBand.retired_conflicts) {
+      STATE.subject.retired_conflicts = Object.assign({}, STATE.subject.retired_conflicts || {}, p.subjectBand.retired_conflicts);
+    }
     applied.push(n + ' subject attribute' + (n === 1 ? '' : 's') + ' & fees');
   }
   if (doMix) {

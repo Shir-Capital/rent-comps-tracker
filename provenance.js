@@ -131,6 +131,15 @@ function pvBandIndex() {
   add('amenities', typeof AMENITIES !== 'undefined' ? AMENITIES : [], it => it.label);
   add('fees', (SCHEMA.fees || []).filter(f => f.compsLabel), f => f.compsLabel);
   add('fees', SCHEMA.fees || [], f => f.label);
+  /* Rows the template retired at MF v73 / ExStay v69 ("W/D Provided" ...).
+     Results files written before that still name backfilled cells by them; the
+     answer now lives on the Physical key (core.js foldRetiredAttrs), so the
+     card goes there too. Added last: never displaces a real label. The card's
+     own value check (pvSame) still flags it if the Physical value differs. */
+  (SCHEMA.retiredAmenities || []).forEach(r => {
+    const l = pvNorm(r.label);
+    if (l && !idx.has(l)) idx.set(l, { bag: 'physical', key: r.foldTo });
+  });
   return idx;
 }
 
@@ -795,7 +804,12 @@ function pvMark(container, kind, payload) {
   if (lbl) { container.__pvNote = lbl.getAttribute('title'); lbl.removeAttribute('title'); }
   // The Screener's capped text answer carries its full text as a title; the card shows it.
   const txt = container.querySelector(':scope > .sc-txt[title]');
-  if (txt) txt.removeAttribute('title');
+  if (txt) {
+    /* A retired-row conflict (screener physGlyph, 2026-11-19) is not the cell's
+       text but a note about it: carry it into the card like a label's note. */
+    if (txt.classList.contains('sc-clash')) container.__pvNote = txt.getAttribute('title');
+    txt.removeAttribute('title');
+  }
 }
 
 function pvUnmark(container) {
