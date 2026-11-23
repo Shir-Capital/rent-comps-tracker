@@ -438,6 +438,69 @@ function pfRRBlock(ws, first, lastBound, cols, sections) {
 }
 
 /**
+ * The RR tab's LEASE-LEVEL table (2026-11-23), for the internal comp.
+ *
+ * MF templates carry it under a `Unit Type Name` header (RR!C2000 on v59+,
+ * around row 800 on v7-v8): one row per unit with type, Reno/Unreno, unit #,
+ * BRs, baths, SF, Move In, LXP, Base / Other / Effective Rent and Vac. It is
+ * what the proforma's COMPS "Internal:" block averages. Columns are found by
+ * their header TEXT, never by letter, and the table ends at the template's `x`
+ * terminator row (RR!C2637) or after 60 empty rows. Dates come through SheetJS
+ * as Excel serials and are stored as yyyy-mm-dd. Returns null when the sheet
+ * has no such table (ExStay's UNITS, very old files) — never throws for that.
+ */
+function pfReadRRLeases(ws) {
+  if (!ws) return null;
+  const { maxRow, maxCol } = pfRange(ws);
+  const scanTo = Math.min(maxRow, 6000), cMax = Math.min(maxCol, 30);
+  let hdr = 0, planCol = 0;
+  for (let r = 1; r <= scanTo && !hdr; r++) {
+    for (let c = 1; c <= cMax; c++) {
+      if (pfS(pfV(ws, r, c)).toLowerCase() === 'unit type name') { hdr = r; planCol = c; break; }
+    }
+  }
+  if (!hdr) return null;
+  const want = {
+    finish: /^reno\s*\/\s*unreno$/, unit: /^unit\s*#$/, beds: /^#\s*brs?$/, baths: /^#\s*ba(th)?s?$/,
+    sf: /^sq\.?\s*ft\.?$/, move_in: /^move[\s-]*in$/, lxp: /^lxp$/, base: /^base rent$/,
+    other: /^other rent$/, eff: /^effective rent$/, occ: /^vac\.?$/,
+  };
+  const col = { plan: planCol };
+  for (let c = planCol; c <= cMax; c++) {
+    const h = pfS(pfV(ws, hdr, c)).toLowerCase();
+    Object.keys(want).forEach(k => { if (!col[k] && want[k].test(h)) col[k] = c; });
+  }
+  if (!col.lxp || !col.eff) return null;
+  const date = v => {
+    if (typeof v === 'number') return xlSerialToISO(v);
+    if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+    const s = pfS(v);
+    if (!s) return '';
+    const d = new Date(s);
+    return isNaN(d) ? '' : d.toISOString().slice(0, 10);
+  };
+  const rows = [];
+  let blanks = 0;
+  for (let r = hdr + 1; r <= scanTo; r++) {
+    const plan = pfS(pfV(ws, r, col.plan));
+    if (plan.toLowerCase() === 'x') break;                     // the template's terminator row
+    const unit = col.unit ? pfS(String(pfV(ws, r, col.unit) == null ? '' : pfV(ws, r, col.unit))) : '';
+    if (!plan && !unit) { if (++blanks > 60) break; continue; }
+    blanks = 0;
+    const n = k => (col[k] ? pfN(pfV(ws, r, col[k])) : null);
+    rows.push({
+      unit, plan, finish: col.finish ? pfS(pfV(ws, r, col.finish)) : '',
+      beds: n('beds'), baths: n('baths'), sf: n('sf'),
+      move_in: col.move_in ? date(pfV(ws, r, col.move_in)) : '',
+      lxp: date(pfV(ws, r, col.lxp)),
+      base: n('base'), other: n('other'), eff: n('eff'),
+      occ: col.occ ? pfS(pfV(ws, r, col.occ)) : '',
+    });
+  }
+  return rows.length ? { headerRow: hdr, rows } : null;
+}
+
+/**
  * Read the subject unit mix out of an RR worksheet.
  * Returns null when the tab does not look like an RR unit mix, so the caller can
  * fall back to the COMPS subject block rather than importing an empty mix.
@@ -1396,6 +1459,8 @@ function pfPreviewHtml() {
       ${grp('pf-g-mix', 'Subject unit mix', p.subjectUnitMix.length, nMix ? 'replaces ' + nMix : '')}
       ${grp('pf-g-comps', 'Comps', p.comps.length, nComps ? 'replaces ' + nComps : '')}
       ${grp('pf-g-rents', 'Market rent overrides', Object.keys(p.marketRents).length, '')}
+      ${grp('pf-g-leases', 'Subject leases (RR, for the internal comp)', p.leases ? p.leases.rows.length : 0,
+        STATE.subjectLeases && STATE.subjectLeases.rows && STATE.subjectLeases.rows.length ? 'replaces ' + STATE.subjectLeases.rows.length : '')}
     </div>
     ${subjRows ? `<hr class="hr-soft"/><div class="pf-sub">${subjRows}</div>` : ''}
     ${compRows ? `<hr class="hr-soft"/><div class="pf-sub">${compRows}</div>` : ''}
@@ -1487,6 +1552,12 @@ async function pfRead() {
       try { det.rr = pfReadRR(wb.Sheets[rrName]); }
       catch (e) { console.warn('RR read failed, falling back to the COMPS block', e); det.rr = null; }
     }
+    /* The lease-level table under the unit mix, for the internal comp. Non-fatal. */
+    let leases = null;
+    if (rrName) {
+      try { leases = pfReadRRLeases(wb.Sheets[rrName]); if (leases) leases.sheet = rrName; }
+      catch (e) { console.warn('RR lease table read failed', e); leases = null; }
+    }
 
     /* DASH holds the address, city/state/zip and market that the COMPS tab has
        no cell for, and the authoritative unit count. Also non-fatal. */
@@ -1497,6 +1568,7 @@ async function pfRead() {
     }
 
     PF.parsed = pfToImport(det);
+    PF.parsed.leases = leases;
     PF.step = 'preview';
   } catch (e) {
     console.error('pfRead', e);
@@ -1513,8 +1585,8 @@ function pfApply() {
   const want = id => { const el = $('#' + id); return !!(el && el.checked && !el.disabled); };
   const doSubject = want('pf-g-subject'), doMix = want('pf-g-mix');
   const doComps = want('pf-g-comps'), doRents = want('pf-g-rents');
-  const doBand = want('pf-g-sband');
-  if (!doSubject && !doMix && !doComps && !doRents && !doBand) { toast('Nothing checked'); return; }
+  const doBand = want('pf-g-sband'), doLeases = want('pf-g-leases');
+  if (!doSubject && !doMix && !doComps && !doRents && !doBand && !doLeases) { toast('Nothing checked'); return; }
 
   /* Two-press confirmation rather than confirm(). A native dialog cannot be
      dismissed by anything driving this page, and this is the one button in the
@@ -1582,6 +1654,18 @@ function pfApply() {
     });
     applied.push(Object.keys(p.marketRents).length + ' market rents');
   }
+  /* Subject leases (2026-11-23): the RR lease table, replaced as a set — it is
+     the rent roll's list, not something anyone types. The filters
+     (STATE.internalComp) are kept. */
+  if (doLeases && p.leases) {
+    const pf0 = pfPickedFile();
+    STATE.subjectLeases = {
+      rows: p.leases.rows.map(r => Object.assign({}, r)),
+      fileName: pf0 ? pf0.name : '', sheet: p.leases.sheet || 'RR', headerRow: p.leases.headerRow,
+      importedAt: nowISO(),
+    };
+    applied.push(p.leases.rows.length + ' subject leases');
+  }
 
   /* Provenance, recorded as data rather than appended to the notes textarea.
      Keyed per group because the subject and the comps can legitimately come from
@@ -1622,6 +1706,7 @@ function pfApply() {
   }
   if (doComps) STATE.imports.comps = Object.assign(rec(), { comps: p.comps.length });
   if (doRents) STATE.imports.marketRents = Object.assign(rec(), { rents: Object.keys(p.marketRents).length });
+  if (doLeases && p.leases) STATE.imports.leases = Object.assign(rec(), { rows: p.leases.rows.length, source: p.leases.sheet || 'RR' });
 
   saveState();
   pfResetImport();

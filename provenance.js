@@ -473,7 +473,7 @@ function pvInstallImportHooks() {
   window.pfApply = function () {
     const box = $('#pf-g-prov');
     const res = box && box.checked && !box.disabled && PF.results && PF.results.doc ? PF.results : null;
-    const others = ['pf-g-subject', 'pf-g-mix', 'pf-g-comps', 'pf-g-rents', 'pf-g-sband']
+    const others = ['pf-g-subject', 'pf-g-mix', 'pf-g-comps', 'pf-g-rents', 'pf-g-sband', 'pf-g-leases']
       .some(id => { const e = $('#' + id); return e && e.checked && !e.disabled; });
     if (!others) {
       if (!res) return innerApply.apply(this, arguments);

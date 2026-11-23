@@ -103,6 +103,13 @@
     ordered.forEach(c => { if (compRowsFor(c, key).length) out.push(c); });
     return out;
   }
+  /* INTERNAL COMP (2026-11-23): the subject's own recent leases (core.js
+     internalCompFor, the proforma's COMPS "Internal:" block). It rides the same
+     ◀ ▶ cycle as the real comps, LAST, so the tab still opens on the top comp;
+     the "Internal" button in the cycle header jumps straight to it. */
+  const INTERNAL = { __internal: true, compId: '__internal', name: 'Internal' };
+  function cycleFor(key) { return compsWithBucket(key).concat([INTERNAL]); }
+  function isInternal(c) { return !!(c && c.__internal); }
   /** The subject plan carrying the most units — the default anchor. */
   function anchorRowFor(key) {
     const rows = subjectRowsFor(key);
@@ -419,33 +426,114 @@
       </div>`;
   }
 
-  function compPaneHtml() {
-    const key = SC.bucket;
-    const list = compsWithBucket(key);
+  /** ◀ n / N ▶ + one dot per comp (+ the internal comp) + the Internal jump. */
+  function cycleHtml(list, c, key) {
     const all = sortedComps();
-
-    if (!list.length) {
-      return `<div class="sc-head">
-          <div class="sc-htop"><span class="sc-tag untyped">None</span>
-            <span class="sc-name">—</span></div></div>
-        <div class="sc-body"><div class="sc-empty">
-          <span class="big">No comp has a ${esc(bucketShortOf(key))}</span>
-          <span>${all.length} comps captured, none with this unit type</span></div></div>`;
-    }
-    if (SC.compIdx >= list.length) SC.compIdx = 0;
-    const c = list[SC.compIdx];
-    const meta = categoryMeta(c.category);
-    const vac = num(c.vacancy_pct);
-    const dists = all.map(x => num(x.distance_miles)).filter(v => v > 0);
-    const allSameDist = dists.length > 2 && new Set(dists).size === 1;
-
     const dots = all.map(x => {
       const present = list.indexOf(x) !== -1;
       return `<button class="sc-dot${x === c ? ' on' : ''}${present ? '' : ' absent'}"
         ${present ? '' : 'disabled'} data-sccomp="${esc(x.compId)}"
         title="${esc(x.name || 'comp')}${present ? '' : ' — no ' + esc(bucketShortOf(key))}"
         aria-label="${esc(x.name || 'comp')}"></button>`;
+    }).join('') + `<button class="sc-dot int${isInternal(c) ? ' on' : ''}" data-sccomp="${INTERNAL.compId}"
+        title="Internal: the subject's own recent leases" aria-label="Internal comp"></button>`;
+    return `<div class="sc-cyc">
+        <button id="sc-prev" title="Previous comp with this unit type" aria-label="Previous comp">◀</button>
+        <span class="pos">${SC.compIdx + 1} / ${list.length}</span>
+        <button id="sc-next" title="Next comp with this unit type" aria-label="Next comp">▶</button>
+        <div class="sc-dots">${dots}</div>
+        <button id="sc-int" class="sc-intbtn${isInternal(c) ? ' on' : ''}" title="The subject's own recent leases, from the rent roll">Internal</button>
+      </div>`;
+  }
+
+  function fmtDate(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    return m ? (+m[2]) + '/' + (+m[3]) + '/' + m[1].slice(2) : '—';
+  }
+
+  /** The internal comp's pane: the proforma's COMPS "Internal:" block, live. */
+  function internalPaneHtml(list) {
+    const key = SC.bucket;
+    const ic = internalCompFor(key);
+    const set = internalCompSettings();
+    const sl = (STATE && STATE.subjectLeases) || null;
+    const head = `<div class="sc-head">
+        <div class="sc-htop">
+          <span class="sc-tag internal">Internal</span>
+          <span class="sc-name">${esc((STATE.subject && STATE.subject.name) || STATE.name || 'Subject')} — own leases</span>
+          <div class="sc-facts">
+            <span>${ic.hasLeases ? int(ic.leaseCount) + ' units on the RR' : 'no lease table yet'}</span>
+            <span title="${esc(sl && sl.fileName ? sl.fileName + ' · ' + (sl.sheet || 'RR') + ' row ' + (sl.headerRow || '') : '')}">${
+              sl && sl.importedAt ? 'imported ' + esc(relTime(sl.importedAt)) : '—'}</span>
+          </div>
+          ${cycleHtml(list, INTERNAL, key)}
+        </div></div>`;
+    const filt = `<div class="sc-ifilt">
+        <label>Move-in after <input type="date" id="sc-int-after" value="${esc(set.moveInAfter || '')}"
+          title="COMPS!T4 'Move-In After:' — blank = any move-in date"/></label>
+        <label>LXP look-back <input type="number" id="sc-int-lb" min="0" max="36" step="1" inputmode="numeric"
+          value="${esc(set.lookbackMonths)}" title="COMPS!W4 'Start # Mos LookBack' — blank = no LXP filter"/> mos</label>
+        <span class="sc-icut" title="Leases counted: occupied, LXP on or after this date (= signed in the last N months on a 12-month lease)${
+          ic.moveInAfter ? ', moved in on or after ' + esc(fmtDate(ic.moveInAfter)) : ''}">LXP ≥ ${ic.cutoff ? esc(fmtDate(ic.cutoff)) : 'any'}</span>
+        <button type="button" id="sc-int-reset" class="sc-other" title="Back to 12 months, no move-in date">Reset</button>
+      </div>`;
+    if (!ic.hasLeases) {
+      return head + filt + `<div class="sc-body"><div class="sc-empty">
+        <span class="big">No rent-roll leases on this record</span>
+        <span>Import from Proforma (tab 1) and tick <b>Subject leases</b>: it reads the RR tab's lease table
+        (the "Unit Type Name" block), as the proforma's COMPS "Internal:" block does.</span></div></div>`;
+    }
+    const anchor = subjectRowsFor(key)[SC.anchor] || null;
+    const aRent = anchor ? num(anchor.current_rent) : 0;
+    const body = ic.rows.map(x => {
+      const d = aRent > 0 && x.rent != null ? x.rent - aRent : null;
+      return `<tr>
+        <td class="l plan">${esc(x.plan || '—')}</td>
+        <td class="l"><span class="sc-st ${statusClass(x.status)}">${esc(x.status || '—')}</span></td>
+        <td>${x.sf ? int(x.sf) : '—'}</td>
+        <td title="${x.leases} of ${x.total} ${esc(x.plan)} ${esc(x.status)} units pass the filters">${x.leases}<span class="muted">/${x.total}</span></td>
+        <td>${x.lxp ? esc(fmtDate(x.lxp)) : '—'}</td>
+        <td class="rent">${x.rent != null ? money(x.rent) : '—'}</td>
+        <td class="psf">${x.psf != null ? '$' + x.psf.toFixed(2) : '—'}</td>
+        <td><span class="sc-dlt ${d == null ? 'flat' : (d > 0 ? 'up' : (d < 0 ? 'dn' : 'flat'))}">${
+          d == null ? '—' : (d > 0 ? '+' : '−') + money(Math.abs(d)).slice(1)}</span></td>
+      </tr>`;
     }).join('');
+    const s = ic.section;
+    const subjAvg = weightedBy(subjectRowsFor(key), r => num(r.current_rent), r => occupiedOf(r));
+    const gap = s.rent != null && subjAvg > 0 ? s.rent - subjAvg : 0;
+    const leases = ic.matched.slice().sort((a, b) => (b.move_in || '').localeCompare(a.move_in || ''));
+    const list2 = SC.showLeases ? `<div class="sc-ileases"><table class="sc-mix">
+        <thead><tr><th class="l">Unit</th><th class="l">Plan</th><th class="l">Fin.</th><th>SF</th>
+          <th>Move-in</th><th>LXP</th><th>Eff. $</th></tr></thead><tbody>${leases.map(l => `<tr>
+          <td class="l">${esc(l.unit || '—')}</td><td class="l">${esc(l.plan || '')}</td><td class="l">${esc(l.finish || '')}</td>
+          <td>${l.sf ? int(num(l.sf)) : '—'}</td><td>${esc(fmtDate(l.move_in))}</td><td>${esc(fmtDate(l.lxp))}</td>
+          <td class="rent">${l.eff != null ? money(num(l.eff)) : '—'}</td></tr>`).join('')}</tbody></table></div>` : '';
+    return head + filt + `<div class="sc-body sc-scroll9"><table class="sc-mix">
+        <thead><tr><th class="l">Plan</th><th class="l">Fin.</th><th>SF</th><th title="Leases that pass the filters / all units of that plan and finish">Leases</th>
+          <th>Avg LXP</th><th>$/Mo</th><th>$/SF</th><th>Δ vs anchor</th></tr></thead><tbody>${body}</tbody></table></div>
+      <div class="sc-foot">
+        <div class="kv" title="Simple average of the plan rows above, as the proforma's section row (T25 = AVERAGE(T6:T14))"><span class="k">Section $/Mo</span><span class="v">${s.rent != null ? money(s.rent) : '—'}</span></div>
+        <div class="kv"><span class="k">$/SF</span><span class="v">${s.psf != null ? '$' + s.psf.toFixed(2) : '—'}</span></div>
+        <div class="kv"><span class="k">Avg LXP</span><span class="v">${s.lxp ? esc(fmtDate(s.lxp)) : '—'}</span></div>
+        <div class="kv"><span class="k">vs in-place</span><span class="v ${gap >= 0 ? 'up' : 'dn'}">${
+          gap ? (gap > 0 ? '+' : '−') + money(Math.abs(gap)).slice(1) : '—'}</span></div>
+        <button type="button" id="sc-int-list" class="sc-other">${SC.showLeases ? 'Hide' : 'Show'} the ${leases.length} lease${leases.length === 1 ? '' : 's'}</button>
+      </div>${list2}`;
+  }
+
+  function compPaneHtml() {
+    const key = SC.bucket;
+    const list = cycleFor(key);
+    const all = sortedComps();
+
+    if (SC.compIdx >= list.length) SC.compIdx = 0;
+    const c = list[SC.compIdx];
+    if (isInternal(c)) return internalPaneHtml(list);
+    const meta = categoryMeta(c.category);
+    const vac = num(c.vacancy_pct);
+    const dists = all.map(x => num(x.distance_miles)).filter(v => v > 0);
+    const allSameDist = dists.length > 2 && new Set(dists).size === 1;
 
     const rows = compRowsFor(c, key).slice();
     const anchor = subjectRowsFor(key)[SC.anchor] || null;
@@ -484,12 +572,7 @@
           <span ${pv('comp:' + c.compId, 'distance_miles')}${allSameDist ? ' class="flag"' : ''}>${c.distance_miles ? num(c.distance_miles).toFixed(2) + ' mi' : '—'}${allSameDist ? ' ⚑' : ''}</span>
           <span ${pv('comp:' + c.compId, 'vacancy_pct')}${vac > 30 ? ' class="flag"' : ''}>${c.vacancy_pct !== '' && c.vacancy_pct != null ? vac + '% vac' : '—'}${vac > 30 ? ' ⚑' : ''}</span>
           </div>
-          <div class="sc-cyc">
-            <button id="sc-prev" title="Previous comp with this unit type" aria-label="Previous comp">◀</button>
-            <span class="pos">${SC.compIdx + 1} / ${list.length}</span>
-            <button id="sc-next" title="Next comp with this unit type" aria-label="Next comp">▶</button>
-            <div class="sc-dots">${dots}</div>
-          </div>
+          ${cycleHtml(list, c, key)}
         </div></div>
       <div class="sc-body sc-scroll9"><table class="sc-mix">
         <thead><tr><th class="l">Plan</th><th>SF</th><th>#</th><th>Ask</th><th>$/SF</th>
@@ -679,8 +762,12 @@
       return;
     }
 
-    const list = compsWithBucket(SC.bucket);
-    const comp = list.length ? list[Math.min(SC.compIdx, list.length - 1)] : null;
+    const list = cycleFor(SC.bucket);
+    const sel = list[Math.min(SC.compIdx, list.length - 1)];
+    /* The internal comp IS the subject: no photos or attributes of its own. */
+    const comp = isInternal(sel) ? null : sel;
+    const sameAsSubject = isInternal(sel)
+      ? '<div class="sc-empty"><span>Internal comp — same property as the subject (left).</span></div>' : '';
     const other = showOther();
     const photos = showPhotos();
 
@@ -699,7 +786,7 @@
         <div class="sc-side left"><div class="sc-photos" id="sc-sphotos">${
           photoStripHtml(SC.photos['subject'], 'Subject')}</div></div>
         <div class="sc-side"><div class="sc-photos" id="sc-cphotos">${
-          comp ? photoStripHtml(SC.photos['comp:' + comp.compId], 'Comp') : ''}</div></div>
+          comp ? photoStripHtml(SC.photos['comp:' + comp.compId], 'Comp') : sameAsSubject}</div></div>
       </div>` : ''}
       <div class="sc-legend">
         <b>Attributes</b>
@@ -711,7 +798,7 @@
       </div>
       <div class="sc-split sc-band3">
         <div class="sc-side left"><div class="sc-attrs col">${primaryHtml(STATE.subject, true)}</div></div>
-        <div class="sc-side"><div class="sc-attrs col">${comp ? primaryHtml(comp, false) : ''}</div></div>
+        <div class="sc-side"><div class="sc-attrs col">${comp ? primaryHtml(comp, false) : sameAsSubject}</div></div>
       </div>
       ${other ? `<div class="sc-split sc-band3 sc-band3b">
         <div class="sc-side left"><div class="sc-attrs">${otherAttrsHtml(STATE.subject, true)}</div></div>
@@ -771,7 +858,7 @@
     });
     $$('#phase-content [data-sccomp]').forEach(d => {
       d.onclick = () => {
-        const list = compsWithBucket(SC.bucket);
+        const list = cycleFor(SC.bucket);
         const i = list.findIndex(x => x.compId === d.getAttribute('data-sccomp'));
         if (i >= 0) { SC.compIdx = i; renderScreener(); }
       };
@@ -782,13 +869,33 @@
     const photoBtn = $('#sc-photos-tog');
     if (photoBtn) photoBtn.onclick = () => { writeOn(PHOTOS_KEY, !showPhotos()); renderScreener(); };
     if (prev) prev.onclick = () => {
-      const n = compsWithBucket(SC.bucket).length;
+      const n = cycleFor(SC.bucket).length;
       if (n) { SC.compIdx = (SC.compIdx - 1 + n) % n; renderScreener(); }
     };
     if (next) next.onclick = () => {
-      const n = compsWithBucket(SC.bucket).length;
+      const n = cycleFor(SC.bucket).length;
       if (n) { SC.compIdx = (SC.compIdx + 1) % n; renderScreener(); }
     };
+    /* Internal comp controls. The two filters are saved on the record (and so
+       pushed to Drive), like COMPS!T4 / W4 live in the workbook. */
+    const intBtn = $('#sc-int');
+    if (intBtn) intBtn.onclick = () => { SC.compIdx = cycleFor(SC.bucket).length - 1; renderScreener(); };
+    const setInt = patch => {
+      STATE.internalComp = Object.assign({}, internalCompSettings(), patch);
+      saveState();
+      renderScreener();
+    };
+    const after = $('#sc-int-after');
+    if (after) after.onchange = () => setInt({ moveInAfter: after.value || '' });
+    const lb = $('#sc-int-lb');
+    if (lb) lb.onchange = () => {
+      const v = lb.value.trim();
+      setInt({ lookbackMonths: v === '' ? '' : Math.max(0, Math.min(36, Math.round(Number(v)) || 0)) });
+    };
+    const reset = $('#sc-int-reset');
+    if (reset) reset.onclick = () => setInt(Object.assign({}, INTERNAL_DEFAULTS));
+    const lst = $('#sc-int-list');
+    if (lst) lst.onclick = () => { SC.showLeases = !SC.showLeases; renderScreener(); };
     if (apply) apply.onclick = () => {
       const s = computeSuggested(SC.bucket);
       if (!(s.suggested > 0)) return;
@@ -854,5 +961,6 @@
     compsWithBucket, anchorRowFor, marketOf, setMarketForPlan,
     syncBucketOverride, bucketRollup, proformaSeed, sanitizeFolderName,
     primary: PRIMARY, retired: SCHEMA.retiredAmenities || [], state: SC,
+    cycleFor, internal: INTERNAL,
   };
 })();

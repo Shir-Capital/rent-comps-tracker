@@ -103,6 +103,25 @@
 .sc-dot.on { background: var(--navy); transform: scale(1.32); }
 .sc-dot.absent { background: transparent; border: 1px solid #cbd5e1; cursor: not-allowed; }
 
+/* Internal comp (2026-11-23): the subject's own recent leases. */
+.sc-tag.internal { background: #ede9fe; color: #5b21b6; }
+.sc-dot.int { background: #c4b5fd; margin-left: 3px; }
+.sc-dot.int.on { background: #6d28d9; }
+.sc-cyc button.sc-intbtn { width: auto; padding: 0 7px; font-size: 11.5px; font-weight: 600; color: #5b21b6; }
+.sc-cyc button.sc-intbtn.on { background: #ede9fe; border-color: #a78bfa; }
+.sc-ifilt {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+  padding: 5px 10px; border-bottom: 1px solid var(--line); background: #faf8ff;
+  font-size: 12px; color: var(--muted);
+}
+.sc-ifilt label { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; color: var(--ink); }
+.sc-ifilt input { font: inherit; font-size: 12px; padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; }
+.sc-ifilt input[type="number"] { width: 52px; }
+.sc-ifilt .sc-icut { color: #5b21b6; font-weight: 600; }
+.sc-ifilt .sc-other { margin-left: auto; }
+.sc-ileases { max-height: 260px; overflow-y: auto; border-top: 1px solid var(--line); }
+.sc-foot .sc-other { margin-left: auto; }
+
 .sc-body { flex: 1 1 auto; overflow-y: auto; }
 /* Nine rows visible, scroll for the rest — the same count a COMPS section holds.
    9 * 22px + 20px sticky header (was 27px rows, 267px, before 2026-11-19). */
@@ -327,4 +346,11 @@ table.sc-arow tr:hover td { background: #fafbfd; }
   .sc-panel { width: 100%; }
   table.sc-arow td { height: 30px; }
   .sc-cyc button { width: 38px; height: 38px; }
+  .sc-cyc { flex-wrap: wrap; flex: 1 1 100%; min-width: 0; margin-left: 0; }
+  /* An 8-column plan table is wider than a phone: scroll it inside its panel
+     rather than widening the whole page (subject and internal tables alike). */
+  .screener .sc-side { min-width: 0; }
+  .screener .sc-body, .screener .sc-ileases { overflow-x: auto; }
+  .sc-ifilt input { font-size: 16px; padding: 6px; }
+  .sc-ifilt input[type="number"] { width: 64px; }
 }

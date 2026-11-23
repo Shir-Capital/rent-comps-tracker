@@ -409,6 +409,11 @@ function hydrateProperty(p) {
      Keyed by group because the subject and the comps can legitimately come from
      different revisions, or different workbooks entirely. */
   p.imports = p.imports || {};
+  /* Internal comp (2026-11-23): the rent roll's lease-level rows (absent until an
+     Import from Proforma reads them) and the two filters, which live on the
+     record like COMPS!T4 / W4 live in the workbook. */
+  if (p.subjectLeases === undefined) p.subjectLeases = null;
+  p.internalComp = Object.assign({}, INTERNAL_DEFAULTS, p.internalComp || {});
   p.comps.forEach(c => hydrateComp(c));
   return p;
 }
@@ -690,6 +695,112 @@ function unitMixTotals(rows) {
 function directComps() {
   if (!STATE) return [];
   return STATE.comps.filter(c => c.category === 'direct');
+}
+
+/* ------------------------------------------------ INTERNAL COMP (2026-11-23)
+   The subject's OWN recent leases, as one more comp. Recreates the MF proforma's
+   "Internal:" block (COMPS!R3:W176, SHIR_MF_Template_v75) off the RR tab's
+   lease-level table (RR!C2000:O2636, read by proforma-import.js into
+   STATE.subjectLeases.rows). For each subject plan row (plan = COMPS col B,
+   finish = col S):
+
+     SF     T = AVERAGEIFS(RR!H, type=plan, finish)                 every unit
+     LXP    U = AVERAGEIFS(RR!J, type, finish, Vac.="OCC", LXP>=cut, MoveIn>=after)
+     $/Mo   V = AVERAGEIFS(RR!M, same filters)                      Effective Rent
+     $/SF   W = V / T
+
+   with cut = EDATE(TODAY(), 12 - lookback) when COMPS!W4 (look-back months,
+   default 12) is set, and MoveIn >= COMPS!T4 when "Move-In After" is set. A
+   blank control becomes ">=1" in the template, which ALSO drops a unit with no
+   date in that column — kept here. Section row = simple AVERAGE of its plan
+   rows (the template's T25 = AVERAGE(T6:T14)). Dates are ISO yyyy-mm-dd.
+
+   With 12-month leases, LXP >= today + (12 - N) months reads as "signed in the
+   last N months", which is what the look-back is for. Type and finish compare
+   case-insensitively, like AVERAGEIFS. */
+const INTERNAL_DEFAULTS = { moveInAfter: '', lookbackMonths: 12 };
+
+/** Excel serial (1900 system) -> 'yyyy-mm-dd', or '' when not a date. */
+function xlSerialToISO(n) {
+  if (typeof n !== 'number' || !isFinite(n) || n < 1) return '';
+  const ms = Math.round((n - 25569) * 86400000);      // 25569 = 1970-01-01
+  const d = new Date(ms);
+  return isNaN(d) ? '' : d.toISOString().slice(0, 10);
+}
+/** 'yyyy-mm-dd' -> Excel serial (whole days). */
+function isoToXlSerial(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return null;
+  return Math.round(Date.UTC(+m[1], +m[2] - 1, +m[3]) / 86400000) + 25569;
+}
+/** Today in the viewer's local calendar, as 'yyyy-mm-dd' (Excel's TODAY()). */
+function todayLocalISO() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+/** Excel EDATE: same day-of-month n months on, clamped to that month's last day. */
+function edateISO(iso, months) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  if (!m) return '';
+  const y0 = +m[1], mo0 = +m[2] - 1 + Math.trunc(months);
+  const y = y0 + Math.floor(mo0 / 12), mo = ((mo0 % 12) + 12) % 12;
+  const last = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+  const d = Math.min(+m[3], last);
+  return y + '-' + String(mo + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+}
+
+/** The open record's filter settings, defaults filled. */
+function internalCompSettings() {
+  const s = (STATE && STATE.internalComp) || {};
+  return Object.assign({}, INTERNAL_DEFAULTS, s);
+}
+
+/**
+ * The internal comp for one unit-type bucket.
+ * Returns { rows:[{plan, status, sf, leases, total, lxp, rent, psf, subjectRow}],
+ *           section:{sf, lxp, rent, psf}, matched:[lease...], cutoff, moveInAfter,
+ *           leaseCount, hasLeases }.
+ * `today` is injectable for tests; it defaults to the viewer's today, as the
+ * template's TODAY() does.
+ */
+function internalCompFor(bucketKey, today) {
+  const L = (STATE && STATE.subjectLeases && STATE.subjectLeases.rows) || [];
+  const set = internalCompSettings();
+  const lb = String(set.lookbackMonths == null ? '' : set.lookbackMonths).trim();
+  const cutoff = lb === '' || !isFinite(Number(lb)) ? '' : edateISO(today || todayLocalISO(), 12 - Number(lb));
+  const after = /^\d{4}-\d{2}-\d{2}$/.test(String(set.moveInAfter || '')) ? set.moveInAfter : '';
+  const norm = s => String(s == null ? '' : s).trim().toLowerCase();
+  const subj = (groupByBucket(STATE ? STATE.subjectUnitMix : [])[bucketKey]) || [];
+  const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  const matched = [];
+  const rows = subj.map(r => {
+    const same = L.filter(l => norm(l.plan) === norm(r.plan) && norm(l.finish) === norm(r.status));
+    const sfs = same.map(l => num(l.sf)).filter(v => v > 0);
+    const hit = same.filter(l => {
+      if (!(num(l.eff) !== 0 && norm(l.occ) !== 'v')) return false;      // Vac. = "OCC"  (template: Effective Rent <> 0)
+      if (!l.lxp || l.lxp < (cutoff || '0001-01-01')) return false;       // LXP >= cut (blank -> ">=1")
+      if (!l.move_in || l.move_in < (after || '0001-01-01')) return false; // Move In >= after (blank -> ">=1")
+      return true;
+    });
+    hit.forEach(l => matched.push(l));
+    const sf = avg(sfs);
+    const rent = avg(hit.map(l => num(l.eff)));
+    const lxpS = avg(hit.map(l => isoToXlSerial(l.lxp)).filter(v => v != null));
+    return {
+      plan: r.plan, status: r.status, subjectRow: r,
+      sf, rent, psf: rent != null && sf ? rent / sf : null,
+      lxp: lxpS == null ? '' : xlSerialToISO(lxpS), leases: hit.length, total: same.length,
+    };
+  });
+  const vals = k => rows.map(x => x[k]).filter(v => v != null && v !== '');
+  const secSf = avg(vals('sf')), secRent = avg(vals('rent'));
+  const secLxp = avg(rows.map(x => isoToXlSerial(x.lxp)).filter(v => v != null));
+  return {
+    rows, matched, cutoff, moveInAfter: after, lookbackMonths: lb,
+    leaseCount: L.length, hasLeases: L.length > 0,
+    section: { sf: secSf, rent: secRent, psf: secRent != null && secSf ? secRent / secSf : null,
+               lxp: secLxp == null ? '' : xlSerialToISO(secLxp) },
+  };
 }
 
 /** Comps sorted the way the COMPS tab expects: direct -> aspirational -> inferior, then distance. */
