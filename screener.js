@@ -485,10 +485,27 @@
     }
     const anchor = subjectRowsFor(key)[SC.anchor] || null;
     const aRent = anchor ? num(anchor.current_rent) : 0;
-    const body = ic.rows.map(x => {
+    /* Each plan row opens to EVERY unit of that plan + finish (2026-11-23):
+       counted ones in full, excluded ones greyed with the reason, newest move-in
+       first. Open rows are remembered per plan + finish while the tab is open. */
+    SC.openInt = SC.openInt || {};
+    const ikey = x => (x.plan || '') + '|' + (x.status || '');
+    const why = s => s.replace(/(\d{4}-\d{2}-\d{2})/, m => fmtDate(m));
+    const unitsHtml = x => {
+      const us = x.units.slice().sort((a, b) => (b.move_in || '').localeCompare(a.move_in || '') || String(a.unit).localeCompare(String(b.unit)));
+      return `<tr class="sc-iunits"><td colspan="8"><table class="sc-mix sc-iutab">
+        <thead><tr><th class="l">Unit</th><th>SF</th><th>Move-in</th><th>LXP</th><th>Eff. $</th><th class="l">Counted</th></tr></thead>
+        <tbody>${us.map(u => `<tr class="${u.excluded ? 'out' : 'in'}">
+          <td class="l">${esc(u.unit || '—')}</td><td>${u.sf ? int(num(u.sf)) : '—'}</td>
+          <td>${esc(fmtDate(u.move_in))}</td><td>${esc(fmtDate(u.lxp))}</td>
+          <td class="rent">${u.eff ? money(num(u.eff)) : '—'}</td>
+          <td class="l">${u.excluded ? esc(why(u.excluded)) : '✓'}</td></tr>`).join('')}</tbody></table></td></tr>`;
+    };
+    const body = ic.rows.map((x, i) => {
       const d = aRent > 0 && x.rent != null ? x.rent - aRent : null;
-      return `<tr>
-        <td class="l plan">${esc(x.plan || '—')}</td>
+      const open = !!SC.openInt[ikey(x)];
+      return `<tr class="sc-irow${open ? ' open' : ''}" data-scint="${i}" title="${open ? 'Hide' : 'Show'} all ${x.total} ${esc(x.plan)} ${esc(x.status)} units">
+        <td class="l plan"><span class="sc-chev">${x.total ? (open ? '▾' : '▸') : ''}</span>${esc(x.plan || '—')}</td>
         <td class="l"><span class="sc-st ${statusClass(x.status)}">${esc(x.status || '—')}</span></td>
         <td>${x.sf ? int(x.sf) : '—'}</td>
         <td title="${x.leases} of ${x.total} ${esc(x.plan)} ${esc(x.status)} units pass the filters">${x.leases}<span class="muted">/${x.total}</span></td>
@@ -497,8 +514,9 @@
         <td class="psf">${x.psf != null ? '$' + x.psf.toFixed(2) : '—'}</td>
         <td><span class="sc-dlt ${d == null ? 'flat' : (d > 0 ? 'up' : (d < 0 ? 'dn' : 'flat'))}">${
           d == null ? '—' : (d > 0 ? '+' : '−') + money(Math.abs(d)).slice(1)}</span></td>
-      </tr>`;
+      </tr>${open && x.total ? unitsHtml(x) : ''}`;
     }).join('');
+    const anyOpen = ic.rows.some(x => SC.openInt[ikey(x)]);
     const s = ic.section;
     const subjAvg = weightedBy(subjectRowsFor(key), r => num(r.current_rent), r => occupiedOf(r));
     const gap = s.rent != null && subjAvg > 0 ? s.rent - subjAvg : 0;
@@ -518,6 +536,7 @@
         <div class="kv"><span class="k">Avg LXP</span><span class="v">${s.lxp ? esc(fmtDate(s.lxp)) : '—'}</span></div>
         <div class="kv"><span class="k">vs in-place</span><span class="v ${gap >= 0 ? 'up' : 'dn'}">${
           gap ? (gap > 0 ? '+' : '−') + money(Math.abs(gap)).slice(1) : '—'}</span></div>
+        <button type="button" id="sc-int-expand" class="sc-other" title="Show or hide every unit under every plan row">${anyOpen ? 'Collapse all' : 'Expand all'}</button>
         <button type="button" id="sc-int-list" class="sc-other">${SC.showLeases ? 'Hide' : 'Show'} the ${leases.length} lease${leases.length === 1 ? '' : 's'}</button>
       </div>${list2}`;
   }
@@ -896,6 +915,26 @@
     if (reset) reset.onclick = () => setInt(Object.assign({}, INTERNAL_DEFAULTS));
     const lst = $('#sc-int-list');
     if (lst) lst.onclick = () => { SC.showLeases = !SC.showLeases; renderScreener(); };
+    /* Internal comp: a plan row opens / closes its full unit list. */
+    const ic = $('#sc-comp .sc-irow') ? internalCompFor(SC.bucket) : null;
+    const ikey = x => (x.plan || '') + '|' + (x.status || '');
+    $$('#sc-comp [data-scint]').forEach(tr => {
+      tr.onclick = () => {
+        const x = ic && ic.rows[Number(tr.getAttribute('data-scint'))];
+        if (!x || !x.total) return;
+        SC.openInt = SC.openInt || {};
+        SC.openInt[ikey(x)] = !SC.openInt[ikey(x)];
+        renderScreener();
+      };
+    });
+    const exp = $('#sc-int-expand');
+    if (exp) exp.onclick = () => {
+      if (!ic) return;
+      SC.openInt = SC.openInt || {};
+      const anyOpen = ic.rows.some(x => SC.openInt[ikey(x)]);
+      ic.rows.forEach(x => { SC.openInt[ikey(x)] = !anyOpen && x.total > 0; });
+      renderScreener();
+    };
     if (apply) apply.onclick = () => {
       const s = computeSuggested(SC.bucket);
       if (!(s.suggested > 0)) return;

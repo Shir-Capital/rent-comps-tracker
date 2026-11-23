@@ -120,6 +120,16 @@
 .sc-ifilt .sc-icut { color: #5b21b6; font-weight: 600; }
 .sc-ifilt .sc-other { margin-left: auto; }
 .sc-ileases { max-height: 260px; overflow-y: auto; border-top: 1px solid var(--line); }
+/* Internal comp: plan rows open to their full unit list. */
+tr.sc-irow { cursor: pointer; }
+tr.sc-irow:hover td { background: #faf8ff; }
+tr.sc-irow.open td { background: #f5f3ff; }
+.sc-chev { display: inline-block; width: 12px; color: #6d28d9; font-size: 10px; }
+tr.sc-iunits > td { padding: 0 0 4px 14px; background: #fcfbff; }
+table.sc-iutab { width: 100%; font-size: 11.5px; }
+table.sc-iutab th { font-size: 10px; }
+table.sc-iutab tr.out td { color: #94a3b8; }
+table.sc-iutab tr.in td:last-child { color: #15803d; font-weight: 700; }
 .sc-foot .sc-other { margin-left: auto; }
 
 .sc-body { flex: 1 1 auto; overflow-y: auto; }

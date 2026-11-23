@@ -776,12 +776,19 @@ function internalCompFor(bucketKey, today) {
   const rows = subj.map(r => {
     const same = L.filter(l => norm(l.plan) === norm(r.plan) && norm(l.finish) === norm(r.status));
     const sfs = same.map(l => num(l.sf)).filter(v => v > 0);
-    const hit = same.filter(l => {
-      if (!(num(l.eff) !== 0 && norm(l.occ) !== 'v')) return false;      // Vac. = "OCC"  (template: Effective Rent <> 0)
-      if (!l.lxp || l.lxp < (cutoff || '0001-01-01')) return false;       // LXP >= cut (blank -> ">=1")
-      if (!l.move_in || l.move_in < (after || '0001-01-01')) return false; // Move In >= after (blank -> ">=1")
-      return true;
-    });
+    /* Why a unit is left out of the averages ('' = counted), in the template's
+       own test order. Kept per unit so the expanded row can show every unit of
+       the plan, counted or not, and say why. */
+    const why = l => {
+      if (!(num(l.eff) !== 0 && norm(l.occ) !== 'v')) return 'vacant';     // Vac. = "OCC"  (template: Effective Rent <> 0)
+      if (!l.lxp) return 'no LXP';                                         // LXP >= cut (blank -> ">=1")
+      if (cutoff && l.lxp < cutoff) return 'LXP before ' + cutoff;
+      if (!l.move_in) return 'no move-in';                                 // Move In >= after (blank -> ">=1")
+      if (after && l.move_in < after) return 'moved in before ' + after;
+      return '';
+    };
+    const units = same.map(l => Object.assign({}, l, { excluded: why(l) }));
+    const hit = units.filter(l => !l.excluded);
     hit.forEach(l => matched.push(l));
     const sf = avg(sfs);
     const rent = avg(hit.map(l => num(l.eff)));
@@ -790,6 +797,7 @@ function internalCompFor(bucketKey, today) {
       plan: r.plan, status: r.status, subjectRow: r,
       sf, rent, psf: rent != null && sf ? rent / sf : null,
       lxp: lxpS == null ? '' : xlSerialToISO(lxpS), leases: hit.length, total: same.length,
+      units,                                // every unit of this plan + finish, each with `excluded`
     };
   });
   const vals = k => rows.map(x => x[k]).filter(v => v != null && v !== '');
