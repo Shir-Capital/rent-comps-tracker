@@ -77,17 +77,14 @@ function pfVersion(name) {
   return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
 }
 
-/* Most recently modified first (owner, 2026-11-24): the file someone just saved
-   is the one they mean to import. Tier, then version, only break a tie — two
-   files saved in the same second. (Before: tier first, then version, then date,
-   so an old IC/Final build sat above this week's Acq Team work.) */
+/* Strictly most recently modified first (owner, 2026-11-24: "re-sort these items strictly based off of the date
+   modified in the Windows File Explorer and ignore the priorities"). `modifiedTime` is the content date
+   (pfContentDates), which is what Explorer shows. No tier / version priority anywhere in the list; two files saved
+   in the same second go by name so the order is stable. A file with no date sorts last. */
 function pfCmp(a, b) {
   const d = String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || ''));
   if (d) return d;
-  const t = PF_TIER_RANK[b.tier] - PF_TIER_RANK[a.tier];
-  if (t) return t;
-  if (b.version[0] !== a.version[0]) return b.version[0] - a.version[0];
-  return b.version[1] - a.version[1];
+  return String(a.name || '').localeCompare(String(b.name || ''));
 }
 
 /* File TYPE for the picker's short list (owner, 2026-11-24: "only show the highest 3 version numbers of each
@@ -113,66 +110,16 @@ function pfFileType(name) {
   return 'name:' + m[1].toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
-/* How many versions of each type the short list shows. */
-const PF_PER_TYPE = 3;
-
-/** Ids of the short list: the PF_PER_TYPE highest versions of each type (version, then the newer file on a
-    tie — `v6` and `v6 CHDO` are two files). A folder with no typed file at all falls back to the newest
-    PF_LIST_SHOW. The caller adds the pre-selected file. */
-function pfShortListIds(files) {
-  const by = {};
-  for (const f of files) {
-    const t = f.type || pfFileType(f.name);
-    if (t === 'Other') continue;
-    (by[t] = by[t] || []).push(f);
-  }
-  const ids = new Set();
-  for (const t of Object.keys(by)) {
-    by[t].sort((a, b) => (b.version[0] - a.version[0]) || (b.version[1] - a.version[1])
-      || String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || '')));
-    by[t].slice(0, PF_PER_TYPE).forEach(f => ids.add(f.id));
-  }
-  if (!ids.size) files.slice(0, PF_LIST_SHOW).forEach(f => ids.add(f.id));
-  return ids;
-}
-
-/* The grid (owner, 2026-11-24: "show the options in 3 columns by 5 rows, highest ranking items in order, the rest in
-   the expansion"). Rank = the tier ladder (IC / Final > AMRev > HOAcqRev > AcqRev > Init UW), then the series the
-   ladder has no rung for (AI-Full, a bare UW, a named series like `Dryfield Studios Austin`), then 'Other' (inputs,
-   unversioned) last. Within a type: highest version first, then the newer file. Each type is kept together, so with
-   3 versions per type every grid row reads as one type, newest version on the left. Two series on the same rung
-   (two named series) go highest version first: Dryfield `Studios Austin_v12` before the older `Studios_v6`. */
+/* The grid (owner, 2026-11-24: "3 columns by 5 rows ... the rest in the expansion"): the PF_GRID_COLS x PF_GRID_ROWS
+   = 15 most recently modified workbooks, filled row by row; everything else under "Show N more", same order. */
 const PF_GRID_COLS = 3, PF_GRID_ROWS = 5;
-const PF_TYPE_RANK = { ICFinal: 7, AM: 6, Senior: 5, Junior: 4, InitUW: 3, AIFull: 2, UW: 1, Other: -1 };
 const PF_TYPE_LABEL = { AIFull: 'AI-Full', UW: 'UW', Other: '' };
-function pfTypeRank(t) { return t in PF_TYPE_RANK ? PF_TYPE_RANK[t] : 0; }  // 'name:…' series = 0
 /** Line-2 label: the tier label for a tier type (so `HOAAcq Rev_v4` reads "Head of Acq" too), else AI-Full / UW,
     else nothing (a named series' name is already line 1). */
 function pfTypeLabel(f) {
   const t = f.type || pfFileType(f.name);
   return t in PF_TIER_LABEL && t ? PF_TIER_LABEL[t] : (PF_TYPE_LABEL[t] || '');
 }
-/** `list` sorted by rank (see above). `all` = every candidate, for each series' highest version. */
-function pfRankSort(list, all) {
-  const vnum = f => f.version[0] * 10000 + f.version[1];
-  const best = {};
-  for (const f of all || list) {
-    const t = f.type || pfFileType(f.name);
-    best[t] = Math.max(best[t] || 0, vnum(f));
-  }
-  return list.slice().sort((a, b) => {
-    const ta = a.type || pfFileType(a.name), tb = b.type || pfFileType(b.name);
-    const r = pfTypeRank(tb) - pfTypeRank(ta);
-    if (r) return r;
-    if (ta !== tb) {
-      if (ta === 'Other' || tb === 'Other') return 0;
-      return (best[tb] - best[ta]) || (ta < tb ? -1 : 1);
-    }
-    if (ta === 'Other') return String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || ''));
-    return (vnum(b) - vnum(a)) || String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || ''));
-  });
-}
-
 /** File name as shown in a grid cell: without the deal's own name in front (`SANT TX - Trails of Elm Creek - `,
     `AUS  TX - Lantern - `, `Harmon_Square_`) and without the extension. The full name stays in the tooltip.
     Falls back to the full name when nothing would be left. */
@@ -1534,15 +1481,12 @@ function pfFileRowHtml(f, checked, shown) {
   </label>`;
 }
 
-/* Fallback length of the short list when a folder has no typed file (see pfShortListIds). A deal folder can
-   hold 70+ workbooks (Lantern 73, Trails 69). */
-const PF_LIST_SHOW = 12;
 
 const PF_HINT_IDLE = 'Pulls the subject, its unit mix, the comps and the column-G market '
   + 'rents out of a proforma in this deal\'s 2. UW-Analysis folder. Nothing is applied until you review it.';
-const PF_HINT_LIST = 'Up to 15 workbooks, 3 columns by 5 rows: the 3 highest versions of each file type, ranked IC / '
-  + 'Final, AMRev, HOAcqRev, AcqRev, Init UW, then other series; "Show more" lists every other workbook in the same '
-  + 'order. The file this record was last imported from is pre-selected and always shown; with no earlier import, '
+const PF_HINT_LIST = 'Every workbook, most recently modified first (the date Windows Explorer shows: the last '
+  + 'change to the file\'s contents). The 15 newest fill the 3 x 5 grid, row by row; "Show older files" lists the '
+  + 'rest in the same order. The file this record was last imported from is pre-selected; with no earlier import, '
   + 'the newest file is.';
 
 function pfImportCardHtml() {
@@ -1559,27 +1503,25 @@ function pfImportCardHtml() {
   } else if (PF.step === 'preview' && PF.parsed) {
     body = pfPreviewHtml();
   } else if (PF.step === 'list') {
-    /* Grid = the short list (3 highest versions of each type), ranked (pfRankSort), first PF_GRID_COLS x
-       PF_GRID_ROWS = 15, filled row by row. The pre-selected file is always in it: if it ranks below 15 it takes the
-       last cell. Every other workbook, same ranking, sits under "Show N more". */
+    /* Strictly by content date, newest first (pfCmp; PF.files is already in that order): the first
+       PF_GRID_COLS x PF_GRID_ROWS = 15 in the grid, filled row by row, the rest under "Show N more" in the same
+       order. The pre-selected file keeps its place; if it is older than the 15th, the expansion opens on load so it
+       is still visible. */
     const cap = PF_GRID_COLS * PF_GRID_ROWS;
-    const short = pfShortListIds(PF.files);
-    const ranked = pfRankSort(PF.files.filter(f => short.has(f.id)), PF.files);
-    let top = ranked.slice(0, cap);
-    const pick = PF.files.find(f => f.id === PF.pickId);
-    if (pick && !top.includes(pick)) top = top.slice(0, cap - 1).concat(pick);
-    const rest = pfRankSort(PF.files.filter(f => !top.includes(f)), PF.files);
+    const sorted = PF.files.slice().sort(pfCmp);
+    const top = sorted.slice(0, cap), rest = sorted.slice(cap);
+    const pickInRest = rest.some(f => f.id === PF.pickId);
     const deal = STATE.name || '';
     const shown = new Map([...pfDisplayNames(top, deal), ...pfDisplayNames(rest, deal)]);
     const row = f => pfFileRowHtml(f, f.id === PF.pickId, shown.get(f.id));
     body = `
       <div class="card-hint">
-        The 3 highest versions of each file type, ranked IC / Final, AMRev, HOAcqRev, AcqRev, Init UW. ${PF.lastImportId
+        Most recently modified first (the date Windows Explorer shows). ${PF.lastImportId
           ? 'The file this record was last imported from is pre-selected.'
           : 'The newest file is pre-selected — check it is the build you mean before reading it.'}
       </div>
       <div class="pf-files pf-grid">${top.map(row).join('')}</div>
-      ${rest.length ? `<details class="pf-more"><summary>Show ${rest.length} more file${rest.length === 1 ? '' : 's'} (older versions, inputs)</summary>
+      ${rest.length ? `<details class="pf-more"${pickInRest ? ' open' : ''}><summary>Show ${rest.length} older file${rest.length === 1 ? '' : 's'}</summary>
         <div class="pf-files pf-grid">${rest.map(row).join('')}</div>
       </details>` : ''}
       <div class="btn-row" style="margin-top:9px">
