@@ -90,6 +90,52 @@ function pfCmp(a, b) {
   return b.version[1] - a.version[1];
 }
 
+/* File TYPE for the picker's short list (owner, 2026-11-24: "only show the highest 3 version numbers of each
+   filename type like AcqRev, HOAAcqRev, AMRev, Init UW"). The tier markers above are the types (IC / Final,
+   AMRev, HOAcqRev, AcqRev, Init UW), plus three the tiers leave out:
+   - `HOAAcq` (the misspelling, live on Mia Riverside / Havenwood) joins HOAcqRev here — the tier ladder still
+     leaves it untiered on purpose, but for "which versions to show" it is plainly the same series;
+   - `AI-Full` and a bare `UW` (`Trails of Elm Creek UW v11`, `Ext Stay Hotel_UW_v18`) are their own series;
+   - any other VERSIONED file is a series of its own, keyed by the name before its version
+     (`Dryfield Studios Austin_v12_CHDO`, `SANT_Lila At Oakgate_Proforma_v10` — real proformas with no tier word).
+   Raw input builds (`+RR+T12`, `+Comps+RR+T12`), demographics, cleaned RR / T12 files and anything unversioned
+   are 'Other': never in the short list, always under "Show more". */
+const PF_INPUT_RE = /\+\s*(?:comps|rr|t12|um|unit ?mix)\b|unit mix from|demographics|unmapped|cleaned for import|rr (?:details )?converter|tabular rr|normalized t12/i;
+function pfFileType(name) {
+  const t = pfClassify(name);
+  if (t) return t;
+  if (/(?:^|[^A-Za-z])HOA+cq/i.test(name)) return 'Senior';
+  if (/(?:^|[^A-Za-z])AI[ _-]?Full(?![A-Za-z])/i.test(name)) return 'AIFull';
+  if (/(?:^|[^A-Za-z])UW(?![A-Za-z])/i.test(name)) return 'UW';
+  if (PF_INPUT_RE.test(name)) return 'Other';
+  const m = /^(.*?)[ _-]*v\d+(?:[_.]\d+)?(?!\d)/i.exec(String(name || '').replace(/\.xls[xm]$/i, ''));
+  if (!m || !m[1].trim()) return 'Other';
+  return 'name:' + m[1].toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+/* How many versions of each type the short list shows. */
+const PF_PER_TYPE = 3;
+
+/** Ids of the short list: the PF_PER_TYPE highest versions of each type (version, then the newer file on a
+    tie — `v6` and `v6 CHDO` are two files). A folder with no typed file at all falls back to the newest
+    PF_LIST_SHOW. The caller adds the pre-selected file. */
+function pfShortListIds(files) {
+  const by = {};
+  for (const f of files) {
+    const t = f.type || pfFileType(f.name);
+    if (t === 'Other') continue;
+    (by[t] = by[t] || []).push(f);
+  }
+  const ids = new Set();
+  for (const t of Object.keys(by)) {
+    by[t].sort((a, b) => (b.version[0] - a.version[0]) || (b.version[1] - a.version[1])
+      || String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || '')));
+    by[t].slice(0, PF_PER_TYPE).forEach(f => ids.add(f.id));
+  }
+  if (!ids.size) files.slice(0, PF_LIST_SHOW).forEach(f => ids.add(f.id));
+  return ids;
+}
+
 /** Drive modifiedTime -> "Nov 19, 2026, 4:50 PM" in the viewer's own time zone. */
 function pfModified(iso) {
   if (!iso) return '';
@@ -137,7 +183,7 @@ async function pfFindCandidates(dealFolderId) {
            one, so the photo lookup needs to know where this file came from. */
         folderId: f.id,
         modifiedTime: file.modifiedTime, size: Number(file.size || 0),
-        tier: pfClassify(file.name), version: pfVersion(file.name),
+        tier: pfClassify(file.name), version: pfVersion(file.name), type: pfFileType(file.name),
       });
     }
   }
@@ -1378,14 +1424,15 @@ function pfFileRowHtml(f, checked) {
   </label>`;
 }
 
-/* How many files show before the rest fold under "N older files". A deal folder
-   can hold 70+ workbooks (Lantern 73, Trails 69); the recent ones are the choice. */
+/* Fallback length of the short list when a folder has no typed file (see pfShortListIds). A deal folder can
+   hold 70+ workbooks (Lantern 73, Trails 69). */
 const PF_LIST_SHOW = 12;
 
 const PF_HINT_IDLE = 'Pulls the subject, its unit mix, the comps and the column-G market '
   + 'rents out of a proforma in this deal\'s 2. UW-Analysis folder. Nothing is applied until you review it.';
-const PF_HINT_LIST = 'Most recently modified first (Drive\'s modified date). The file this record was last '
-  + 'imported from is pre-selected; with no earlier import, the newest file is.';
+const PF_HINT_LIST = 'The 3 highest versions of each file type (Init UW, AcqRev, HOAcqRev, AMRev, IC / Final, …), '
+  + 'most recently modified first (Drive\'s modified date); "Show more" lists every other workbook. The file this '
+  + 'record was last imported from is pre-selected and always shown; with no earlier import, the newest file is.';
 
 function pfImportCardHtml() {
   if (!STATE) return '';
@@ -1401,20 +1448,21 @@ function pfImportCardHtml() {
   } else if (PF.step === 'preview' && PF.parsed) {
     body = pfPreviewHtml();
   } else if (PF.step === 'list') {
-    /* One list, newest first. The picked file is always in the visible part:
-       if it is older than the first PF_LIST_SHOW, the fold opens. */
+    /* Short list = the 3 highest versions of each file type, newest first; the pre-selected file is always in
+       it. Every other workbook sits under "Show N more", also newest first. */
     const row = f => pfFileRowHtml(f, f.id === PF.pickId);
-    const recent = PF.files.slice(0, PF_LIST_SHOW), older = PF.files.slice(PF_LIST_SHOW);
-    const pickedOlder = older.some(f => f.id === PF.pickId);
+    const short = pfShortListIds(PF.files);
+    if (PF.pickId) short.add(PF.pickId);
+    const top = PF.files.filter(f => short.has(f.id)), rest = PF.files.filter(f => !short.has(f.id));
     body = `
       <div class="card-hint">
-        Most recently modified first. ${PF.lastImportId
+        The 3 highest versions of each file type, most recently modified first. ${PF.lastImportId
           ? 'The file this record was last imported from is pre-selected.'
           : 'The newest file is pre-selected — check it is the build you mean before reading it.'}
       </div>
-      <div class="pf-files">${recent.map(row).join('')}</div>
-      ${older.length ? `<details class="pf-more"${pickedOlder ? ' open' : ''}><summary>${older.length} older file${older.length === 1 ? '' : 's'}</summary>
-        <div class="pf-files">${older.map(row).join('')}</div>
+      <div class="pf-files">${top.map(row).join('')}</div>
+      ${rest.length ? `<details class="pf-more"><summary>Show ${rest.length} more file${rest.length === 1 ? '' : 's'} (older versions, inputs)</summary>
+        <div class="pf-files">${rest.map(row).join('')}</div>
       </details>` : ''}
       <div class="btn-row" style="margin-top:9px">
         <button class="btn primary small" id="btn-pf-read">Read COMPS tab</button>
