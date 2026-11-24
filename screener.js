@@ -480,12 +480,14 @@
         </div></div>`;
     const filt = `<div class="sc-ifilt">
         <label>Move-in after <input type="date" id="sc-int-after" value="${esc(set.moveInAfter || '')}"
-          title="COMPS!T4 'Move-In After:' — blank = any move-in date"/></label>
+          title="COMPS!T4 'Move-In After:' — blank = any move-in date. With 'Move-in within' also set, the later date applies."/></label>
+        <label>Move-in within <input type="number" id="sc-int-mi" min="0" max="120" step="1" inputmode="numeric"
+          value="${esc(set.moveInMonths)}" title="Count only leases that moved in within the last N months (default 12). Older ones stay in the expanded list, unticked. Tracker-only: the proforma's Internal block has no such filter. Blank = no limit."/> mos</label>
         <label>LXP look-back <input type="number" id="sc-int-lb" min="0" max="36" step="1" inputmode="numeric"
           value="${esc(set.lookbackMonths)}" title="COMPS!W4 'Start # Mos LookBack' — blank = no LXP filter"/> mos</label>
         <span class="sc-icut" title="Leases counted: occupied, LXP on or after this date (= signed in the last N months on a 12-month lease)${
           ic.moveInAfter ? ', moved in on or after ' + esc(fmtDate(ic.moveInAfter)) : ''}">LXP ≥ ${ic.cutoff ? esc(fmtDate(ic.cutoff)) : 'any'}</span>
-        <button type="button" id="sc-int-reset" class="sc-other" title="Back to 12 months, no move-in date">Reset</button>
+        <button type="button" id="sc-int-reset" class="sc-other" title="Back to the defaults: move-in within 12 months, LXP look-back 12 months, no move-in date">Reset</button>
       </div>`;
     if (!ic.hasLeases) {
       return head + filt + `<div class="sc-body"><div class="sc-empty">
@@ -1009,6 +1011,11 @@
     };
     const after = $('#sc-int-after');
     if (after) after.onchange = () => setInt({ moveInAfter: after.value || '' });
+    const mi = $('#sc-int-mi');
+    if (mi) mi.onchange = () => {
+      const v = mi.value.trim();
+      setInt({ moveInMonths: v === '' ? '' : Math.max(0, Math.min(120, Math.round(Number(v)) || 0)) });
+    };
     const lb = $('#sc-int-lb');
     if (lb) lb.onchange = () => {
       const v = lb.value.trim();

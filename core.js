@@ -762,7 +762,12 @@ function directComps() {
    With 12-month leases, LXP >= today + (12 - N) months reads as "signed in the
    last N months", which is what the look-back is for. Type and finish compare
    case-insensitively, like AVERAGEIFS. */
-const INTERNAL_DEFAULTS = { moveInAfter: '', lookbackMonths: 12 };
+/* moveInMonths (2026-11-24, owner): by default only leases that moved in within
+   the last 12 months count; older ones still show in the expanded unit list,
+   greyed with "moved in before …" and no checkbox. The proforma has no such
+   switch (only T4 "Move-In After"), so the effective move-in cutoff is the LATER
+   of the typed date and today - N months. Blank = no rolling limit. */
+const INTERNAL_DEFAULTS = { moveInAfter: '', moveInMonths: 12, lookbackMonths: 12 };
 
 /** Excel serial (1900 system) -> 'yyyy-mm-dd', or '' when not a date. */
 function xlSerialToISO(n) {
@@ -820,7 +825,10 @@ function internalCompFor(bucketKey, today) {
   const set = internalCompSettings();
   const lb = String(set.lookbackMonths == null ? '' : set.lookbackMonths).trim();
   const cutoff = lb === '' || !isFinite(Number(lb)) ? '' : edateISO(today || todayLocalISO(), 12 - Number(lb));
-  const after = /^\d{4}-\d{2}-\d{2}$/.test(String(set.moveInAfter || '')) ? set.moveInAfter : '';
+  const typed = /^\d{4}-\d{2}-\d{2}$/.test(String(set.moveInAfter || '')) ? set.moveInAfter : '';
+  const mm = String(set.moveInMonths == null ? '' : set.moveInMonths).trim();
+  const miCut = mm === '' || !isFinite(Number(mm)) ? '' : edateISO(today || todayLocalISO(), -Number(mm));
+  const after = typed && miCut ? (typed > miCut ? typed : miCut) : (typed || miCut);
   const norm = s => String(s == null ? '' : s).trim().toLowerCase();
   /* Leases the analyst unticked by hand (2026-11-23), keyed by internalLeaseKey.
      Only a lease that passes the filters can be unticked; it then drops out of
@@ -864,7 +872,7 @@ function internalCompFor(bucketKey, today) {
   const secSf = avg(vals('sf')), secRent = avg(vals('rent'));
   const secLxp = avg(rows.map(x => isoToXlSerial(x.lxp)).filter(v => v != null));
   return {
-    rows, matched, cutoff, moveInAfter: after, lookbackMonths: lb,
+    rows, matched, cutoff, moveInAfter: after, moveInTyped: typed, moveInCut: miCut, moveInMonths: mm, lookbackMonths: lb,
     unchecked: rows.reduce((a, x) => a + x.unchecked, 0),
     uncheckedAll: Object.keys(off).filter(k => off[k]).length,
     leaseCount: L.length, hasLeases: L.length > 0,
