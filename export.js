@@ -278,7 +278,7 @@ function buildPopulatorPayload() {
     /* Keep this fallback at the CURRENT floor, not the historical one. It fires only
        when schema.js failed to load, and a stale value here is the one failure the
        analyst cannot see. Bump it in lockstep with comps_schema.json. */
-    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v53.py',
+    populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v55.py',
     generated_at: nowISO(),
     generated_by: (CURRENT_USER && CURRENT_USER.email) || '',
     property_url: APP_BASE_URL + propertyHash(STATE).replace(/^#/, '#'),
@@ -431,7 +431,7 @@ function buildPopulatorPayload() {
 function extraFeesJson(fees) {
   return extraFeesOf(fees).map(x => ({ label: String(x.label || '').trim(), amount: numOrNull(x.amount) }));
 }
-/** fees.extra in populate_comps-v54's `mandatory_fees` shape. Only named fees with an amount. */
+/** fees.extra in the `mandatory_fees` shape populate_comps-v54+ reads (v55 live). Only named fees with an amount. */
 function mandatoryFeesJson(fees) {
   return extraFeesOf(fees)
     .filter(x => String(x.label || '').trim() !== '' && numOrNull(x.amount) != null && numOrNull(x.amount) !== '' && Number(numOrNull(x.amount)) !== 0)
@@ -964,7 +964,7 @@ function renderPhase4() {
       <div class="card-head"><span class="grow">Then, on a machine with the proforma</span></div>
       <div class="card-body">
         <div class="muted small">Run the proven populator against the deal's proforma:</div>
-        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MF Rent Comps Unified Skill\\scripts\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v53.py')}" ^
+        <pre class="tiny" style="white-space:pre-wrap;background:#f1f5f9;padding:8px;border-radius:6px;margin:7px 0 0">python "SKILLS\\MF Rent Comps Unified Skill\\scripts\\${esc(TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v55.py')}" ^
   "&lt;proforma_in.xlsx&gt;" "&lt;proforma_out.xlsx&gt;" "${esc(exportFileBase())}.json" --skip-fetch</pre>
         <div class="tiny muted" style="margin-top:6px">
           Then reconcile the populated COMPS tab against the <b>COMPS Cell Map</b> sheet.<br/>
@@ -972,12 +972,14 @@ function renderPhase4() {
           by the populator's own by-label dispatcher: Physical ${esc(TAB.physRowFirst)}–${esc(TAB.physRowLast)},
           Amenities ${esc(TAB.amenRowFirst)}–${esc(TAB.amenRowLast)}, FEES ${esc(TAB.feeRowFirst)}–${esc(TAB.feeRowLast)}
           (Eff. $/Mo sums through row ${esc(TAB.feeSumLastRow)}), row 4 = year · units · distance · vacancy · concession.<br/>
-          <b>Use v53</b> (rent-comp-data-populator-populate_comps-v53.py). It resolves the key-attributes band
+          <b>Use v55</b> (rent-comp-data-populator-populate_comps-v55.py). It places the named mandatory fees in the open
+          Mandatory Fees slots of template v76 (each under its own name; a re-run reuses the slot with that name),
+          resolves the key-attributes band
           (MF v73+ / ExStay v69+), the independent-band geometry before it (MF v41–v72, ExStay v38–v68) and the
           older shared-band geometry (MF v3–v40, ExStay v1–v37) from the workbook's own labels, and folds the
           three retired Amenities answers (Private Yards, W/D Connections, W/D Provided) into their Physical
           rows, so it is safe to run against any live deal — no version needs to be picked by hand.
-          <b>v52 and earlier abort on a v73 / v69 workbook.</b>
+          <b>v53 and earlier ignore the named mandatory fees; v52 and earlier abort on a v73 / v69 workbook.</b>
           <b>Every earlier populator (v43 and before) correctly REFUSES to write a v41+ workbook</b> rather
           than write to the wrong rows — that is a safety guard doing its job, not a bug, but it means only
           v44 and later can complete a run against the current template.
