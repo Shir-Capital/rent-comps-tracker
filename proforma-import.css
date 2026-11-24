@@ -17,6 +17,12 @@
 .pf-file-main { display: flex; flex-direction: column; min-width: 0; }
 .pf-file-name { font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .pf-file-meta { font-size: 12px; color: var(--muted); }
+/* Modified date (2026-11-24): the list is ordered by it, so it reads first under the name. */
+.pf-file-date { font-size: 12px; color: var(--navy); font-variant-numeric: tabular-nums; }
+.pf-file-last {
+  display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 6px;
+  font-size: 11px; font-weight: 600; color: var(--navy); background: #e6ecf8; vertical-align: 1px;
+}
 
 .pf-more { margin-top: 8px; }
 .pf-more > summary { font-size: 13px; color: var(--muted); cursor: pointer; padding: 5px 0; }
@@ -45,9 +51,9 @@
 .pf-stamp-file { font-weight: 600; }
 
 @media (min-width: 900px) {
-  /* The file list is the one place this card can get tall — two columns keeps a
-     20-file deal folder on one screen. Everything else stays single-column. */
-  .pf-files { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+  /* One column even here (2026-11-24): the list is newest-first, and a two-column
+     grid read that order left-right. Only PF_LIST_SHOW rows show before the
+     "N older files" fold, so it no longer needs the second column to fit. */
   .pf-file { min-height: 0; padding: 5px 7px; }
   .pf-grp { min-height: 0; padding: 2px 0; }
 }

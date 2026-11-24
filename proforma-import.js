@@ -77,12 +77,25 @@ function pfVersion(name) {
   return m ? [parseInt(m[1], 10), m[2] ? parseInt(m[2], 10) : 0] : [0, 0];
 }
 
+/* Most recently modified first (owner, 2026-11-24): the file someone just saved
+   is the one they mean to import. Tier, then version, only break a tie — two
+   files saved in the same second. (Before: tier first, then version, then date,
+   so an old IC/Final build sat above this week's Acq Team work.) */
 function pfCmp(a, b) {
+  const d = String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || ''));
+  if (d) return d;
   const t = PF_TIER_RANK[b.tier] - PF_TIER_RANK[a.tier];
   if (t) return t;
   if (b.version[0] !== a.version[0]) return b.version[0] - a.version[0];
-  if (b.version[1] !== a.version[1]) return b.version[1] - a.version[1];
-  return String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || ''));
+  return b.version[1] - a.version[1];
+}
+
+/** Drive modifiedTime -> "Nov 19, 2026, 4:50 PM" in the viewer's own time zone. */
+function pfModified(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 /**
@@ -1339,21 +1352,40 @@ function pfToImport(det) {
 
 function pfPickedFile() { return PF.files.find(f => f.id === PF.pickId) || null; }
 
+/** Id of the candidate this record's comps (else unit mix, else any group) came from, by
+    file id, else by name (a re-uploaded file keeps its name but not its id). '' if none. */
+function pfLastImportId(files) {
+  const imp = (STATE && STATE.imports) || {};
+  const recs = ['comps', 'unitMix', 'subject', 'marketRents', 'leases'].map(k => imp[k]).filter(r => r && (r.fileId || r.fileName));
+  for (const r of recs) {
+    const hit = files.find(f => r.fileId && f.id === r.fileId) || files.find(f => r.fileName && f.name === r.fileName);
+    if (hit) return hit.id;
+  }
+  return '';
+}
+
 function pfFileRowHtml(f, checked) {
   const ver = f.version[0] ? 'v' + f.version[0] + (f.version[1] ? '.' + f.version[1] : '') : '—';
   return `<label class="pf-file${checked ? ' sel' : ''}">
     <input type="radio" name="pf-file" value="${esc(f.id)}"${checked ? ' checked' : ''}/>
     <span class="pf-file-main">
-      <span class="pf-file-name">${esc(f.name)}</span>
+      <span class="pf-file-name">${esc(f.name)}${f.id && f.id === PF.lastImportId
+        ? ' <span class="pf-file-last" title="This record\'s comps / unit mix were imported from this file">last imported</span>' : ''}</span>
+      <span class="pf-file-date" title="${esc(f.modifiedTime || '')}">Modified ${esc(pfModified(f.modifiedTime) || '—')}${
+        f.modifiedTime ? ' · ' + esc(relTime(f.modifiedTime)) : ''}</span>
       <span class="pf-file-meta">${esc(PF_TIER_LABEL[f.tier])} · ${esc(ver)}${f.sub ? ' · ' + esc(f.sub) : ''}</span>
     </span>
   </label>`;
 }
 
+/* How many files show before the rest fold under "N older files". A deal folder
+   can hold 70+ workbooks (Lantern 73, Trails 69); the recent ones are the choice. */
+const PF_LIST_SHOW = 12;
+
 const PF_HINT_IDLE = 'Pulls the subject, its unit mix, the comps and the column-G market '
   + 'rents out of a proforma in this deal\'s 2. UW-Analysis folder. Nothing is applied until you review it.';
-const PF_HINT_LIST = 'Ranked by review tier first (IC / Final, Asset Mgmt, Head of Acq, Acq Team, '
-  + 'Init UW), then by version within that tier. A version number never outranks a tier.';
+const PF_HINT_LIST = 'Most recently modified first (Drive\'s modified date). The file this record was last '
+  + 'imported from is pre-selected; with no earlier import, the newest file is.';
 
 function pfImportCardHtml() {
   if (!STATE) return '';
@@ -1369,19 +1401,20 @@ function pfImportCardHtml() {
   } else if (PF.step === 'preview' && PF.parsed) {
     body = pfPreviewHtml();
   } else if (PF.step === 'list') {
-    const untiered = PF.files.filter(f => !f.tier);
+    /* One list, newest first. The picked file is always in the visible part:
+       if it is older than the first PF_LIST_SHOW, the fold opens. */
+    const row = f => pfFileRowHtml(f, f.id === PF.pickId);
+    const recent = PF.files.slice(0, PF_LIST_SHOW), older = PF.files.slice(PF_LIST_SHOW);
+    const pickedOlder = older.some(f => f.id === PF.pickId);
     body = `
       <div class="card-hint">
-        Ranked by review tier first (IC / Final → Asset Mgmt → Head of Acq → Acq Team → Init UW),
-        then by version within that tier. A version number never outranks a tier —
-        <code>AcqRev v9</code> is still an Acq Team build.
+        Most recently modified first. ${PF.lastImportId
+          ? 'The file this record was last imported from is pre-selected.'
+          : 'The newest file is pre-selected — check it is the build you mean before reading it.'}
       </div>
-      <div class="pf-files">${PF.files.filter(f => f.tier).map((f, i) => pfFileRowHtml(f, i === 0)).join('')
-        || '<div class="muted small">No file in 2. UW-Analysis carries a tier marker.</div>'}</div>
-      ${untiered.length ? `<details class="pf-more"><summary>${untiered.length} file(s) with no tier marker</summary>
-        <div class="pf-files">${untiered.map(f => pfFileRowHtml(f, false)).join('')}</div>
-        <div class="tiny muted">A file lands here when its marker ran into another word.
-        Selectable, but the durable fix is to rename it so every later run agrees with this one.</div>
+      <div class="pf-files">${recent.map(row).join('')}</div>
+      ${older.length ? `<details class="pf-more"${pickedOlder ? ' open' : ''}><summary>${older.length} older file${older.length === 1 ? '' : 's'}</summary>
+        <div class="pf-files">${older.map(row).join('')}</div>
       </details>` : ''}
       <div class="btn-row" style="margin-top:9px">
         <button class="btn primary small" id="btn-pf-read">Read COMPS tab</button>
@@ -1515,7 +1548,13 @@ async function pfStart() {
   try {
     PF.files = await pfFindCandidates(STATE.drive.folderId);
     if (!PF.files.length) throw new Error('No .xlsx files found in 2. UW-Analysis');
-    const first = PF.files.find(f => f.tier) || PF.files[0];
+    /* Pre-select the workbook this record was last imported from, so a re-import
+       stays on the build whose comps are already here. Only a record with no
+       import takes the newest. Not simply "newest": on 2026-11-21 a bulk write
+       re-stamped the modified date of most deals' old builds (Trails' newest
+       became Init UW v2, Sundance's the Init UW v2 the owner said never to import). */
+    PF.lastImportId = pfLastImportId(PF.files);
+    const first = PF.files.find(f => f.id === PF.lastImportId) || PF.files[0];
     PF.pickId = first.id;
     PF.step = 'list';
   } catch (e) {
