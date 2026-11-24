@@ -281,19 +281,40 @@ function pxBuildMirror(tgt) {
             return;
           }
         } else {
-          /* Generic mode. The template pre-labels the first rows and leaves the
-             rest as blank dropdowns, so we write label + value as a pair, in
-             fee order, from the top. Self-consistent on a fresh workbook; on a
-             used one it can duplicate a fee the analyst already typed further
-             down, which is why the READ ME points at the aligned export and the
-             CLEAR FIRST sheet lists the fee band. */
-          row = FF + Object.keys(taken).length;
-          if (row > FL) {
+          /* Generic mode (no workbook attached), template v76+ (2026-11-24). The Mandatory span is fixed by
+             design: TAB.feeFixedLabels on the first rows (MF 202-206 Amenity / Cable/Internet / Cleaning /
+             Trash / V Trash; ExStay 116-120), five OPEN slots after them (207-211 / 121-125). So, like aligned
+             paste on a fresh v76 sheet: a fee whose name is one of the fixed five goes on ITS row, value only
+             (the template already carries the label — never relabel those rows); every other named fee fills
+             the open slots in order, label + value; more than the open slots are refused with a reason. On
+             schema rows older than v76 (no open slots) a named fee is refused: only the workbook can say. */
+          const fixedLab = TAB.feeFixedLabels || [];
+          const iFix = fixedLab.findIndex(l => pxNorm(l) === pxNorm(f.compsLabel));
+          if (iFix >= 0 && FF + iFix <= FL && !taken[FF + iFix]) {
+            taken[FF + iFix] = true;
+            put(FF + iFix, valueCol, v, who, 'Fee — ' + f.compsLabel + ' (fixed row)');
+            placed++;
+            return;
+          }
+          const openFirst = FF + fixedLab.length;
+          if (!fixedLab.length || FL < openFirst) {
             warn.push(who + ': fee "' + f.compsLabel + '" ($' + v + ') NOT written — ' +
-              'more fees than Mandatory rows (' + FF + '-' + FL + '); attach the deal workbook (aligned mode) to place named fees in its open slots');
+              'without the deal workbook only the fixed fees can be placed; attach it (aligned mode) to place named fees');
+            return;
+          }
+          row = null;
+          for (let r = openFirst; r <= FL; r++) { if (!taken[r]) { row = r; break; } }
+          if (row == null) {
+            warn.push(who + ': fee "' + f.compsLabel + '" ($' + v + ') NOT written — ' +
+              'all ' + (FL - openFirst + 1) + ' open Mandatory Fees slots (' + openFirst + '-' + FL + ') are used');
             return;
           }
           taken[row] = true;
+          if (!putFees.openWarned) {
+            putFees.openWarned = true;
+            warn.push('Named mandatory fees were placed in the template v76 open slots (' + openFirst + '-' + FL + ') without the deal workbook — '
+              + 'paste only into a v76-or-later workbook; on an older one those rows are Optional Fees. Attach the workbook to be sure.');
+          }
         }
         put(row, labelCol, f.compsLabel, who, 'Fee label — ' + f.compsLabel);
         put(row, valueCol, v, who, 'Fee — ' + f.compsLabel);
