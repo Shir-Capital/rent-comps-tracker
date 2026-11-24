@@ -136,6 +136,76 @@ function pfShortListIds(files) {
   return ids;
 }
 
+/* The grid (owner, 2026-11-24: "show the options in 3 columns by 5 rows, highest ranking items in order, the rest in
+   the expansion"). Rank = the tier ladder (IC / Final > AMRev > HOAcqRev > AcqRev > Init UW), then the series the
+   ladder has no rung for (AI-Full, a bare UW, a named series like `Dryfield Studios Austin`), then 'Other' (inputs,
+   unversioned) last. Within a type: highest version first, then the newer file. Each type is kept together, so with
+   3 versions per type every grid row reads as one type, newest version on the left. Two series on the same rung
+   (two named series) go highest version first: Dryfield `Studios Austin_v12` before the older `Studios_v6`. */
+const PF_GRID_COLS = 3, PF_GRID_ROWS = 5;
+const PF_TYPE_RANK = { ICFinal: 7, AM: 6, Senior: 5, Junior: 4, InitUW: 3, AIFull: 2, UW: 1, Other: -1 };
+const PF_TYPE_LABEL = { AIFull: 'AI-Full', UW: 'UW', Other: '' };
+function pfTypeRank(t) { return t in PF_TYPE_RANK ? PF_TYPE_RANK[t] : 0; }  // 'name:…' series = 0
+/** Line-2 label: the tier label for a tier type (so `HOAAcq Rev_v4` reads "Head of Acq" too), else AI-Full / UW,
+    else nothing (a named series' name is already line 1). */
+function pfTypeLabel(f) {
+  const t = f.type || pfFileType(f.name);
+  return t in PF_TIER_LABEL && t ? PF_TIER_LABEL[t] : (PF_TYPE_LABEL[t] || '');
+}
+/** `list` sorted by rank (see above). `all` = every candidate, for each series' highest version. */
+function pfRankSort(list, all) {
+  const vnum = f => f.version[0] * 10000 + f.version[1];
+  const best = {};
+  for (const f of all || list) {
+    const t = f.type || pfFileType(f.name);
+    best[t] = Math.max(best[t] || 0, vnum(f));
+  }
+  return list.slice().sort((a, b) => {
+    const ta = a.type || pfFileType(a.name), tb = b.type || pfFileType(b.name);
+    const r = pfTypeRank(tb) - pfTypeRank(ta);
+    if (r) return r;
+    if (ta !== tb) {
+      if (ta === 'Other' || tb === 'Other') return 0;
+      return (best[tb] - best[ta]) || (ta < tb ? -1 : 1);
+    }
+    if (ta === 'Other') return String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || ''));
+    return (vnum(b) - vnum(a)) || String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || ''));
+  });
+}
+
+/** File name as shown in a grid cell: without the deal's own name in front (`SANT TX - Trails of Elm Creek - `,
+    `AUS  TX - Lantern - `, `Harmon_Square_`) and without the extension. The full name stays in the tooltip.
+    Falls back to the full name when nothing would be left. */
+function pfShortName(name, dealName) {
+  const base = String(name || '').replace(/\.xls[xm]$/i, '');
+  const core = String(dealName || '').replace(/^\s*[A-Za-z]{2,5}\s*-?\s*TX\s*-\s*/i, '')
+    .replace(/\s*\([^)]*\)\s*$/, '').replace(/^the\s+/i, '').trim();
+  const market = /^\s*[A-Za-z]{2,5}\s*-?\s*TX\s*-\s*/i;   // "AUS TX - ", "AUS - TX - "
+  if (core.length < 3) return base.replace(market, '') || base;
+  const words = core.split(/[\s_-]+/).filter(Boolean).map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const rx = new RegExp('^(?:[A-Za-z]{2,5}[\\s_-]+){0,3}?(?:the[\\s_-]+)?' + words.join('[\\s_-]+')
+    + '(?:[\\s_-]*\\([^)]*\\))?[\\s_+-]*', 'i');
+  const m = rx.exec(base);
+  const rest = m ? base.slice(m[0].length).trim() : base.replace(market, '');
+  return rest || base;
+}
+
+/** Display names for one list of options, by file id: pfShortName, then — when every name that still has a " - "
+    starts with the SAME segment before it, and that segment is not itself a file type — that segment is dropped too
+    (`Villa Del Zocalo - ` when the record is "Villas Del Zocalo", `Elevate at Huebner Grove - ` when it is
+    "Elevate"). A folder holding two properties' files (`Casa Del Encanto - …`, `Palatia - …`) has two different
+    segments, so each keeps its property name. */
+function pfDisplayNames(list, dealName) {
+  const names = list.map(f => pfShortName(f.name, dealName));
+  const segs = names.filter(n => n.includes(' - ')).map(n => n.slice(0, n.indexOf(' - ')));
+  const seg = segs.length > 1 && segs.every(s => s === segs[0]) && !pfClassify(segs[0]) && !PF_INIT_UW.test(segs[0])
+    ? segs[0] + ' - ' : '';
+  return new Map(list.map((f, k) => {
+    const n = names[k];
+    return [f.id, (seg && n.startsWith(seg) && n.length > seg.length) ? n.slice(seg.length).trim() : n];
+  }));
+}
+
 /** Drive modifiedTime -> "Nov 19, 2026, 4:50 PM" in the viewer's own time zone. */
 function pfModified(iso) {
   if (!iso) return '';
@@ -1410,16 +1480,22 @@ function pfLastImportId(files) {
   return '';
 }
 
-function pfFileRowHtml(f, checked) {
-  const ver = f.version[0] ? 'v' + f.version[0] + (f.version[1] ? '.' + f.version[1] : '') : '—';
-  return `<label class="pf-file${checked ? ' sel' : ''}">
+/* One option = two lines (owner, 2026-11-24: "wrap any extra text to the 2nd line"): line 1 the file name (deal
+   name and extension dropped; full name in the tooltip), line 2 everything else — type label, version, modified
+   date, subfolder, "last imported" — wrapping only if the cell is too narrow for it. */
+function pfFileRowHtml(f, checked, shown) {
+  const ver = f.version[0] ? 'v' + f.version[0] + (f.version[1] ? '.' + f.version[1] : '') : '';
+  const dealName = (STATE && (STATE.name || (STATE.drive && STATE.drive.folderName))) || '';
+  const meta = [pfTypeLabel(f), ver,
+    f.modifiedTime ? (pfModified(f.modifiedTime) || '') + ' (' + relTime(f.modifiedTime) + ')' : 'modified —',
+    f.sub].filter(Boolean).map(esc).join(' · ');
+  const title = f.name + (f.modifiedTime ? '\nModified ' + f.modifiedTime : '') + (f.sub ? '\nIn ' + f.sub : '');
+  return `<label class="pf-file${checked ? ' sel' : ''}" title="${esc(title)}">
     <input type="radio" name="pf-file" value="${esc(f.id)}"${checked ? ' checked' : ''}/>
     <span class="pf-file-main">
-      <span class="pf-file-name">${esc(f.name)}${f.id && f.id === PF.lastImportId
+      <span class="pf-file-name">${esc(shown || pfShortName(f.name, dealName))}</span>
+      <span class="pf-file-meta">${meta}${f.id && f.id === PF.lastImportId
         ? ' <span class="pf-file-last" title="This record\'s comps / unit mix were imported from this file">last imported</span>' : ''}</span>
-      <span class="pf-file-date" title="${esc(f.modifiedTime || '')}">Modified ${esc(pfModified(f.modifiedTime) || '—')}${
-        f.modifiedTime ? ' · ' + esc(relTime(f.modifiedTime)) : ''}</span>
-      <span class="pf-file-meta">${esc(PF_TIER_LABEL[f.tier])} · ${esc(ver)}${f.sub ? ' · ' + esc(f.sub) : ''}</span>
     </span>
   </label>`;
 }
@@ -1430,9 +1506,10 @@ const PF_LIST_SHOW = 12;
 
 const PF_HINT_IDLE = 'Pulls the subject, its unit mix, the comps and the column-G market '
   + 'rents out of a proforma in this deal\'s 2. UW-Analysis folder. Nothing is applied until you review it.';
-const PF_HINT_LIST = 'The 3 highest versions of each file type (Init UW, AcqRev, HOAcqRev, AMRev, IC / Final, …), '
-  + 'most recently modified first (Drive\'s modified date); "Show more" lists every other workbook. The file this '
-  + 'record was last imported from is pre-selected and always shown; with no earlier import, the newest file is.';
+const PF_HINT_LIST = 'Up to 15 workbooks, 3 columns by 5 rows: the 3 highest versions of each file type, ranked IC / '
+  + 'Final, AMRev, HOAcqRev, AcqRev, Init UW, then other series; "Show more" lists every other workbook in the same '
+  + 'order. The file this record was last imported from is pre-selected and always shown; with no earlier import, '
+  + 'the newest file is.';
 
 function pfImportCardHtml() {
   if (!STATE) return '';
@@ -1448,21 +1525,28 @@ function pfImportCardHtml() {
   } else if (PF.step === 'preview' && PF.parsed) {
     body = pfPreviewHtml();
   } else if (PF.step === 'list') {
-    /* Short list = the 3 highest versions of each file type, newest first; the pre-selected file is always in
-       it. Every other workbook sits under "Show N more", also newest first. */
-    const row = f => pfFileRowHtml(f, f.id === PF.pickId);
+    /* Grid = the short list (3 highest versions of each type), ranked (pfRankSort), first PF_GRID_COLS x
+       PF_GRID_ROWS = 15, filled row by row. The pre-selected file is always in it: if it ranks below 15 it takes the
+       last cell. Every other workbook, same ranking, sits under "Show N more". */
+    const cap = PF_GRID_COLS * PF_GRID_ROWS;
     const short = pfShortListIds(PF.files);
-    if (PF.pickId) short.add(PF.pickId);
-    const top = PF.files.filter(f => short.has(f.id)), rest = PF.files.filter(f => !short.has(f.id));
+    const ranked = pfRankSort(PF.files.filter(f => short.has(f.id)), PF.files);
+    let top = ranked.slice(0, cap);
+    const pick = PF.files.find(f => f.id === PF.pickId);
+    if (pick && !top.includes(pick)) top = top.slice(0, cap - 1).concat(pick);
+    const rest = pfRankSort(PF.files.filter(f => !top.includes(f)), PF.files);
+    const deal = STATE.name || '';
+    const shown = new Map([...pfDisplayNames(top, deal), ...pfDisplayNames(rest, deal)]);
+    const row = f => pfFileRowHtml(f, f.id === PF.pickId, shown.get(f.id));
     body = `
       <div class="card-hint">
-        The 3 highest versions of each file type, most recently modified first. ${PF.lastImportId
+        The 3 highest versions of each file type, ranked IC / Final, AMRev, HOAcqRev, AcqRev, Init UW. ${PF.lastImportId
           ? 'The file this record was last imported from is pre-selected.'
           : 'The newest file is pre-selected — check it is the build you mean before reading it.'}
       </div>
-      <div class="pf-files">${top.map(row).join('')}</div>
+      <div class="pf-files pf-grid">${top.map(row).join('')}</div>
       ${rest.length ? `<details class="pf-more"><summary>Show ${rest.length} more file${rest.length === 1 ? '' : 's'} (older versions, inputs)</summary>
-        <div class="pf-files">${rest.map(row).join('')}</div>
+        <div class="pf-files pf-grid">${rest.map(row).join('')}</div>
       </details>` : ''}
       <div class="btn-row" style="margin-top:9px">
         <button class="btn primary small" id="btn-pf-read">Read COMPS tab</button>
