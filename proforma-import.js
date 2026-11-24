@@ -190,7 +190,7 @@ async function pfFindCandidates(dealFolderId) {
   const out = [];
   for (const f of folders) {
     const listed = await driveList(`'${f.id}' in parents and trashed=false`,
-      'id,name,mimeType,modifiedTime,size,headRevisionId');
+      'id,name,mimeType,modifiedTime,size,headRevisionId,lastModifyingUser(me)');
     for (const file of listed) {
       if (!PF_STATE_FILE_RE.test(file.name)) continue;
       const low = file.name.toLowerCase();
@@ -205,6 +205,7 @@ async function pfFindCandidates(dealFolderId) {
         /* Drive's own modifiedTime, kept for the import stamp. `modifiedTime` above is replaced by the content
            date in pfContentDates below. */
         driveModifiedTime: file.modifiedTime, headRevisionId: file.headRevisionId || '',
+        lastModifiedByMe: !!(file.lastModifyingUser && file.lastModifyingUser.me),
         tier: pfClassify(file.name), version: pfVersion(file.name), type: pfFileType(file.name),
       });
     }
@@ -218,18 +219,24 @@ async function pfFindCandidates(dealFolderId) {
   return out;
 }
 
-/* "Modified" = when the workbook's CONTENT last changed (owner, 2026-11-24: "make sure the date modified shown in
-   the Rent Comps Tracker is matching the date modified from Windows File Explorer").
-   Drive's file `modifiedTime` also moves on metadata-only writes: on 2026-11-21 ~1:15-1:40 PM CT one bulk write
-   re-stamped it on most workbooks of 19 of the 20 live deals (Mia Riverside: 19 files all "Nov 21" with no new
-   revision and the same md5). Windows Explorer (Drive for desktop) keeps the date the content last changed, which is
-   the HEAD REVISION's modifiedTime. Checked 2026-11-24: Mia Riverside 49 / 51 workbooks head revision == Explorer
-   (31 / 51 for file modifiedTime), Copper Mill 10 / 11 (9 / 11); the misses were a 2-3 minute offset and one
-   no-change re-save that Explorer counts and the revision list does not.
-   One revisions.get per workbook, PF_REV_CONCURRENCY at a time; a failure leaves Drive's modifiedTime. */
+/* "Modified" = the date Windows File Explorer shows on the viewer's PC (owner, 2026-11-24, twice: "make sure the date
+   modified shown in the Rent Comps Tracker is matching the date modified from Windows File Explorer").
+   Explorer (Drive for desktop) shows Drive's file `modifiedTime` — EXCEPT when the last change was a metadata-only
+   write made by the viewer's OWN account: Drive for desktop on that PC does not re-stamp its local copy for its own
+   account's metadata write, so Explorer keeps the time of the last content change (the HEAD REVISION). On
+   2026-11-21 ~1:15-1:40 PM CT a write under egordon's account re-stamped `modifiedTime` on most workbooks of 19 of
+   the 20 live deals with no new revision; egordon's Explorer kept the older dates. A no-change re-save by SOMEONE
+   ELSE (Parth on Mia Riverside `AMRev_v1`, Nov 21 09:05) does show in egordon's Explorer.
+   Rule: if the last modifier is me, use the head revision's time when it is older than `modifiedTime`; otherwise
+   use `modifiedTime`. Checked 2026-11-24 on all 20 live deals' 2. UW-Analysis (294 workbooks on egordon's PC):
+   this rule matches Explorer to the minute on 276, head revision always 275, `modifiedTime` always 193. The misses
+   are 1-5 minute offsets (Explorer = the local save, Drive = when the upload landed) and a few files this PC itself
+   re-stamped on Nov 21 — no Drive field carries a PC's local file time, so an exact match for every file is not
+   possible from the web. One revisions.get per workbook whose last modifier is me, PF_REV_CONCURRENCY at a time;
+   a failure keeps Drive's modifiedTime. */
 const PF_REV_CONCURRENCY = 6;
 async function pfContentDates(files) {
-  const todo = files.filter(f => f.headRevisionId);
+  const todo = files.filter(f => f.headRevisionId && f.lastModifiedByMe);
   let i = 0;
   async function worker() {
     while (i < todo.length) {
@@ -237,7 +244,10 @@ async function pfContentDates(files) {
       try {
         const r = await driveFetch('/drive/v3/files/' + encodeURIComponent(f.id) + '/revisions/'
           + encodeURIComponent(f.headRevisionId) + '?fields=modifiedTime&supportsAllDrives=true');
-        if (r && r.modifiedTime) { f.contentModifiedTime = r.modifiedTime; f.modifiedTime = r.modifiedTime; }
+        if (r && r.modifiedTime) {
+          f.contentModifiedTime = r.modifiedTime;
+          if (String(r.modifiedTime) < String(f.modifiedTime)) f.modifiedTime = r.modifiedTime;
+        }
       } catch (e) { /* keep Drive's modifiedTime */ }
     }
   }
@@ -1468,8 +1478,8 @@ function pfFileRowHtml(f, checked, shown) {
   const meta = [pfTypeLabel(f), ver,
     f.modifiedTime ? (pfModified(f.modifiedTime) || '') + ' (' + relTime(f.modifiedTime) + ')' : 'modified —',
     f.sub].filter(Boolean).map(esc).join(' · ');
-  const title = f.name + (f.modifiedTime ? '\nModified (content) ' + f.modifiedTime : '')
-    + (f.driveModifiedTime && f.driveModifiedTime !== f.modifiedTime ? '\nDrive metadata touched ' + f.driveModifiedTime : '')
+  const title = f.name + (f.modifiedTime ? '\nModified ' + f.modifiedTime : '')
+    + (f.driveModifiedTime && f.driveModifiedTime !== f.modifiedTime ? '\nDrive metadata touched by you ' + f.driveModifiedTime : '')
     + (f.sub ? '\nIn ' + f.sub : '');
   return `<label class="pf-file${checked ? ' sel' : ''}" title="${esc(title)}">
     <input type="radio" name="pf-file" value="${esc(f.id)}"${checked ? ' checked' : ''}/>
