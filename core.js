@@ -372,6 +372,41 @@ function normalizeExtraFees(fees) {
   delete fees.unmatched;
   return fees;
 }
+/* DEFAULT FEE LINES (owner 2026-11-24): "the rent comp tracker should be showing pest fees in the Fee section by
+   default for subject and rent comps properties" and "cleaning would be an occasional one that gets printed later,
+   not a default named fee". So the Fees card and the Market Rents fee strip show Amenity, Pest, Cable/Internet,
+   Trash, V Trash on every comp and the subject; Cleaning shows only when that property has a value (or the analyst
+   adds it with "+ Cleaning").
+   Pest is STORED as the named mandatory fee it already was (fees.extra, the first entry whose label starts with
+   "Pest" — so an imported "Pest Control" is that line and keeps its name). Nothing about paste, the populator JSON
+   (mandatory_fees) or import changes: a Pest amount goes to an open Mandatory slot under its own name, as before,
+   and a blank Pest line writes nothing. Cleaning keeps its fixed key and its template row. */
+const FEE_PEST_RE = /^\s*pest\b/i;
+/** Index in fees.extra of the Pest line (first label starting with "Pest"), or -1. */
+function pestFeeIndex(fees) {
+  const l = fees && Array.isArray(fees.extra) ? fees.extra : [];
+  return l.findIndex(x => x && FEE_PEST_RE.test(String(x.label == null ? '' : x.label)));
+}
+/** The default fee lines in display order: the fixed COMPS fees with Pest in Cleaning's place and Cleaning right
+    after it, flagged `hidden` while it has no value. Each: {key, label, value, pest?, index?, occasional?, hidden?}. */
+function defaultFeeLines(fees) {
+  const F = fees || {};
+  const val = v => (v == null ? '' : v);
+  const out = [];
+  const pest = () => {
+    const i = pestFeeIndex(F), x = i >= 0 ? F.extra[i] : null;
+    out.push({ key: 'pest', pest: true, index: i, label: (x && String(x.label).trim()) || 'Pest', value: x ? val(x.amount) : '' });
+  };
+  (SCHEMA.fees || []).filter(f => f.compsLabel).forEach(f => {
+    if (f.key === 'cleaning') {
+      pest();
+      out.push({ key: f.key, label: f.compsLabel, value: val(F[f.key]), occasional: true,
+        hidden: String(val(F[f.key])).trim() === '' });
+    } else out.push({ key: f.key, label: f.compsLabel || f.label, value: val(F[f.key]) });
+  });
+  if (!out.some(x => x.pest)) pest();
+  return out;
+}
 /** The named mandatory fees that carry something (a label or an amount), in order. */
 function extraFeesOf(fees) {
   return (fees && Array.isArray(fees.extra) ? fees.extra : [])

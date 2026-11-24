@@ -692,9 +692,13 @@
     return {
       P: PM, A, F: (who && who.fees) || {}, src, from, clash,
       base: isSubject ? 'subject' : (who && who.compId ? 'comp:' + who.compId : ''),
-      fees: compsFees().map(f => ({ key: f.key, label: f.compsLabel || f.label })),
-      /* Named mandatory fees (open slots, 2026-11-24), this side's own list. */
-      xfees: extraFeesOf(who && who.fees),
+      /* Default fee lines (2026-11-24): Pest always, Cleaning only when this side has it. */
+      fees: defaultFeeLines(who && who.fees).filter(f => !f.hidden),
+      /* Named mandatory fees (open slots, 2026-11-24), this side's own list, less the Pest line shown above. */
+      xfees: (() => {
+        const F = (who && who.fees) || {}, pi = pestFeeIndex(F), pe = pi >= 0 ? F.extra[pi] : null;
+        return extraFeesOf(F).filter(x => x !== pe);
+      })(),
     };
   }
   /** Source-card path for a Physical row that may be showing its Amenities twin. */
@@ -719,12 +723,12 @@
   function feesStripHtml(d) {
     const cells = d.fees.map(f => `<div class="sc-fcell">
         <span class="fl" title="${esc(f.label)}">${esc(f.label)}</span>
-        <span class="fv"${d.base ? ' ' + pv(d.base + '.fees', f.key) : ''}>${feeGlyph(d.F[f.key])}</span></div>`).join('');
+        <span class="fv"${d.base && !f.pest ? ' ' + pv(d.base + '.fees', f.key) : ''}>${feeGlyph(f.value)}</span></div>`).join('');
     /* Then this side's named mandatory fees (Pest Control, …), each under its own name. */
     const xcells = (d.xfees || []).map(x => `<div class="sc-fcell sc-fx">
         <span class="fl" title="${esc(x.label || 'Unnamed mandatory fee')}">${esc(x.label || '—')}</span>
         <span class="fv">${feeGlyph(x.amount)}</span></div>`).join('');
-    const filled = d.fees.filter(f => { const v = d.F[f.key]; return v !== '' && v != null; }).length
+    const filled = d.fees.filter(f => String(f.value == null ? '' : f.value).trim() !== '').length
       + (d.xfees || []).filter(x => String(x.amount == null ? '' : x.amount).trim() !== '').length;
     return `<div class="sc-panel sc-feesp"><h4><span>Fees</span>
         <span class="cov">${filled}/${d.fees.length + (d.xfees || []).length}</span></h4>

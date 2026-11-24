@@ -572,26 +572,50 @@ function feeTableHtml(items, obj, path) {
   }).join('') + `</div>`;
 }
 
+/* The default fee grid (2026-11-24): defaultFeeLines() — Amenity, Pest, Cable/Internet, Trash, V Trash, and
+   Cleaning only when it has a value (else its pair is rendered hidden, for "+ Cleaning" to reveal). The Pest
+   input edits the Pest named fee (data-xfi="pest", created on the first keystroke) through wireExtraFees. */
+function feeGridHtml(fees, path) {
+  const F = fees || {};
+  const full = !(pestFeeIndex(F) >= 0) && (Array.isArray(F.extra) ? F.extra.length : 0) >= FEE_EXTRA_MAX;
+  return `<div class="tri-grid fee-grid">` + defaultFeeLines(F).map(f => {
+    const occ = f.occasional ? ` data-feeocc="${esc(f.key)}"` : '';
+    const hid = f.hidden ? ' hidden' : '';
+    const input = f.pest
+      ? `<input type="number" step="any" inputmode="decimal" data-xfpath="${esc(path)}" data-xfi="pest" data-xff="amount"
+          value="${esc(f.value)}" placeholder="—"${full ? ' disabled title="All ' + FEE_EXTRA_MAX + ' named mandatory fee slots are used — remove one below to add Pest"' : ''} />`
+      : `<input type="number" step="any" inputmode="decimal"
+          data-fpath="${esc(path)}" data-fkey="${esc(f.key)}" value="${esc(f.value)}" placeholder="—" />`;
+    const hint = f.pest ? 'Pest — a mandatory monthly fee; written to an open Mandatory Fees slot on the COMPS tab under this name'
+      : (f.occasional ? 'Cleaning — occasional: shown only when this property charges it' : f.label);
+    return `<div class="lbl${hid}"${occ} title="${esc(hint)}">${esc(f.label)}</div>
+      <div class="fee-cell${hid}"${occ}>${input}</div>`;
+  }).join('') + `</div>`;
+}
+
 /* The named mandatory fees (open Mandatory Fees slots, template v76): one row per fee — its name and $/Mo — up
    to FEE_EXTRA_MAX, under the five fixed fees. The name is free text with the template's own dropdown words
    offered (datalist). Edited through one document-level handler (wireExtraFees) on data-xf* attributes. */
 const FEE_HIDDEN_KEYS = ['other', 'other_label', 'pest'];   // moved into fees.extra by normalizeExtraFees()
 function extraFeesHtml(fees, path) {
   const list = fees && Array.isArray(fees.extra) ? fees.extra : [];
+  const pi = pestFeeIndex(fees);     // the Pest line lives in the fee grid above, not in this list
   const fixed = (SCHEMA.fees || []).filter(f => f.compsLabel).map(f => f.compsLabel.toLowerCase());
-  const words = (SCHEMA.feeVocabulary || []).filter(v => fixed.indexOf(String(v).toLowerCase()) === -1)
-    .concat(['Pest Control', 'Utility Bill Fee', 'Property Liability Fee', 'Community Fee']);
-  const rows = list.map((x, i) => `<div class="xfee-row">
+  const words = (SCHEMA.feeVocabulary || []).filter(v => fixed.indexOf(String(v).toLowerCase()) === -1 && !FEE_PEST_RE.test(String(v)))
+    .concat(['Utility Bill Fee', 'Property Liability Fee', 'Community Fee']);
+  const cleanHidden = String(fees && fees.cleaning != null ? fees.cleaning : '').trim() === '';
+  const rows = list.map((x, i) => i === pi ? '' : `<div class="xfee-row">
       <input type="text" list="fee-extra-vocab" data-xfpath="${esc(path)}" data-xfi="${i}" data-xff="label"
-        value="${esc(x.label)}" placeholder="Fee name, e.g. Pest Control" aria-label="Fee name" />
+        value="${esc(x.label)}" placeholder="Fee name, e.g. Property Liability Fee" aria-label="Fee name" />
       <input type="number" step="any" inputmode="decimal" data-xfpath="${esc(path)}" data-xfi="${i}" data-xff="amount"
         value="${esc(x.amount)}" placeholder="$/Mo" aria-label="$ per month" />
       <button type="button" class="xfee-del" data-xfpath="${esc(path)}" data-xfdel="${i}" title="Remove this fee">✕</button>
     </div>`).join('');
   return `<div class="xfees" data-xfees="${esc(path)}">
-    <div class="sub-label" title="Mandatory monthly fees other than the five above (Pest Control, Property Liability Fee, …). Each goes to an open Mandatory Fees slot on the COMPS tab (template v76: up to ${FEE_EXTRA_MAX}), labelled with its name, and is summed into Eff. $/Mo.">Other mandatory fees <span class="muted">${list.length} / ${FEE_EXTRA_MAX}</span></div>
+    <div class="sub-label" title="Mandatory monthly fees other than the ones above (Property Liability Fee, Utility Bill Fee, …). Each — and Pest — goes to an open Mandatory Fees slot on the COMPS tab (template v76: up to ${FEE_EXTRA_MAX}, Pest included), labelled with its name, and is summed into Eff. $/Mo.">Other mandatory fees <span class="muted">${list.length} / ${FEE_EXTRA_MAX}</span></div>
     ${rows}
     <button type="button" class="btn small" data-xfadd="${esc(path)}"${list.length >= FEE_EXTRA_MAX ? ' disabled' : ''}>+ Add mandatory fee</button>
+    ${cleanHidden ? `<button type="button" class="btn small" data-feeshow="cleaning" title="Occasional: only when this property charges every tenant a cleaning fee">+ Cleaning</button>` : ''}
     <datalist id="fee-extra-vocab">${words.map(w => '<option value="' + esc(w) + '"></option>').join('')}</datalist>
   </div>`;
 }
@@ -604,12 +628,32 @@ function wireExtraFees() {
     const t = resolveFieldTarget(el.getAttribute('data-xfpath'));
     if (!t) return;
     normalizeExtraFees(t);
-    const row = t.extra[Number(el.getAttribute('data-xfi'))];
+    let xi = el.getAttribute('data-xfi');
+    if (xi === 'pest') {                       // the Pest line of the fee grid: created on its first keystroke
+      xi = pestFeeIndex(t);
+      if (xi < 0) {
+        if (el.value === '' || t.extra.length >= FEE_EXTRA_MAX) return;
+        t.extra.push({ label: 'Pest', amount: '' });
+        xi = t.extra.length - 1;
+      }
+    }
+    const row = t.extra[Number(xi)];
     if (!row) return;
     row[el.getAttribute('data-xff')] = el.value;
     saveState();
   });
   document.addEventListener('click', (ev) => {
+    const show = ev.target && ev.target.closest && ev.target.closest('[data-feeshow]');
+    if (show) {                                // "+ Cleaning": reveal the occasional fee's grid pair
+      ev.preventDefault();
+      const body = show.closest('.card-body') || document;
+      const pair = $$('[data-feeocc="' + show.getAttribute('data-feeshow') + '"]', body);
+      pair.forEach(x => x.classList.remove('hidden'));
+      const inp = pair.length ? pair[pair.length - 1].querySelector('input') : null;
+      show.remove();
+      if (inp) inp.focus();
+      return;
+    }
     const add = ev.target && ev.target.closest && ev.target.closest('[data-xfadd]');
     const del = ev.target && ev.target.closest && ev.target.closest('[data-xfdel]');
     if (!add && !del) return;
@@ -1139,7 +1183,7 @@ function subjectBandHtml(s) {
         <div class="card-body">
           <div class="card-hint">Charged to ALL the subject's tenants — COMPS columns G / H.
             Leave blank when unknown; never guess.</div>
-          ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsLabel), s.fees || {}, 'subject.fees')}
+          ${feeGridHtml(s.fees || {}, 'subject.fees')}
           ${(wireExtraFees(), extraFeesHtml(s.fees || {}, 'subject.fees'))}
           <div class="sub-label" title="Fees the tracker knows but the COMPS FEES Mandatory rows do not take (one-time and optional charges). Kept on the record and in the export JSON; not written to the COMPS tab.">Tracker-only (no COMPS row)</div>
           <div class="subject-extra-fees">${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsLabel && FEE_HIDDEN_KEYS.indexOf(f.key) === -1), s.fees || {}, 'subject.fees')}</div>
@@ -1368,7 +1412,7 @@ function renderCompEditor(compId) {
         <div class="card-body">
           <div class="card-hint">Required of ALL tenants — these feed the template's
             Eff. $/Mo formulas. Leave blank when unknown; never guess.</div>
-          ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsLabel), c.fees, path + '.fees')}
+          ${feeGridHtml(c.fees, path + '.fees')}
           ${(wireExtraFees(), extraFeesHtml(c.fees, path + '.fees'))}
         </div>
       </div>
