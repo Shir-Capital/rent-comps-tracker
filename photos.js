@@ -322,8 +322,11 @@ function phValidate(file) {
  * upload then leaves the existing photo untouched rather than deleting it and
  * failing to replace it.
  */
-async function phWriteSlot(comp, slot, file) {
-  const folderId = await phCompFolder(comp, true);
+async function phWriteSlot(comp, slot, file, knownFolderId) {
+  /* `knownFolderId`: the comp's EXISTING folder when the caller already resolved it (the Market Rents drop does,
+     with the same loose name match the read uses), so a comp named `Alma` whose photos live in `Alma Apartments`
+     gets its new photo there rather than in a second, exact-name folder. */
+  const folderId = knownFolderId || await phCompFolder(comp, true);
   if (!folderId) throw new Error('Could not resolve the comp folder on Drive');
   const name = slot.file + '.' + phExt(file);
   const before = await phListImages(folderId);
@@ -1135,6 +1138,67 @@ function phMountCompEditor(compId) {
   };
 })();
 
+// ------------------------------------------------- Market Rents (screener.js) drops
+
+/* Owner, 2026-11-24: "if there are missing photos, can I drag and drop a photo onto the page over the no photo
+   thumbnail". The Market Rents strips (subject left, comp right) call this for a drop or a click-to-pick on an
+   EMPTY tile. Same files, folders and rules as the tab-1 / tab-2 cards — it reuses their writers:
+     subject -> 11. Pictures/subject_<slot>.<ext>      (phsWriteSlot)
+     comp    -> 3. Comps/<comp folder>/<slot>.<ext>    (phWriteSlot; amenities -> amenity.<ext>)
+   The comp folder is resolved with phCompFolder(comp, false) FIRST (exact name, else the one unambiguous loose
+   match) and only created, under the comp's exact name, when there is none. Both cards' caches and the Screener's
+   strip cache are invalidated so every view re-reads Drive. Returns true when a photo was saved. */
+const PH_SC_BUSY = new Set();
+async function phScreenerDrop(kind, comp, slotKey, fileList) {
+  const files = Array.from(fileList || []).filter(Boolean);
+  if (!files.length || !STATE) return false;
+  if (!driveConnected()) {
+    toast('Connect Google Drive first — photos are stored in the deal folder');
+    return false;
+  }
+  if (!STATE.drive || !STATE.drive.folderId) {
+    toast('Link this subject to its deal folder first (☰ → Find Drive Folder)');
+    return false;
+  }
+  const isSubject = kind === 'subject';
+  const slot = (isSubject ? PHS_SLOTS : PH_SLOTS).find(s => s.key === slotKey);
+  if (!slot) return false;
+  if (!isSubject && (!comp || !phSanitize(comp.name))) {
+    toast('Give this comp a name first — the folder is named after it');
+    return false;
+  }
+  const bkey = kind + ':' + (isSubject ? '' : comp.compId) + ':' + slot.key;
+  if (PH_SC_BUSY.has(bkey)) return false;
+
+  const bad = files.map(phValidate).filter(Boolean);
+  const good = files.filter(f => !phValidate(f));
+  if (bad.length) toast(bad[0]);
+  if (!good.length) return false;
+  if (good.length > 1) toast(slot.label + ' holds one photo — using ' + good[0].name);
+
+  PH_SC_BUSY.add(bkey);
+  try {
+    if (isSubject) {
+      await phsWriteSlot(slot, good[0]);
+      toast('Subject ' + slot.label.toLowerCase() + ' photo saved to ' + PICTURES_FOLDER_NAME);
+      phForgetScreener('subject');
+      PHS.state = 'idle';                               // tab 1 re-reads on its next mount
+    } else {
+      const existing = await phCompFolder(comp, false);
+      await phWriteSlot(comp, slot, good[0], existing);
+      toast(comp.name + ' — ' + slot.label.toLowerCase() + ' photo saved to Drive');
+      phForgetScreener('comp:' + comp.compId);
+      if (PH.compId === comp.compId) { PH.compId = null; PH.state = 'idle'; }   // tab 2 re-reads
+    }
+    return true;
+  } catch (e) {
+    toast('Upload failed: ' + ((e && e.message) || e));
+    return false;
+  } finally {
+    PH_SC_BUSY.delete(bkey);
+  }
+}
+
 /* Exposed for the node harness (Accessories/photos_harness.js). Same shape as
    window.SCREENER — the testable pieces, not the whole module. */
 window.PHOTOS = {
@@ -1149,4 +1213,6 @@ window.PHOTOS = {
   SUBJECT_SLOTS: PHS_SLOTS, PHS: PHS, subjectMatchesSlot: phsMatchesSlot,
   subjectLoad: phsLoad, subjectAccept: phsAccept, subjectWriteSlot: phsWriteSlot,
   subjectBodyHtml: phsBodyHtml, subjectCardHtml: phsCardHtml, subjectMount: phsMount,
+  // Market Rents (screener.js)
+  screenerDrop: phScreenerDrop, guardDrop: phGuardCardDrop,
 };

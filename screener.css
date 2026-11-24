@@ -325,6 +325,16 @@ table.sc-arow tr:hover td { background: #fafbfd; }
   aspect-ratio: 3 / 2; display: grid; place-items: center; color: #b6c2d2;
   font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
 }
+/* An empty tile you can drop a photo on, or click to pick one (2026-11-24). */
+.sc-shot.none.drop { cursor: pointer; }
+.sc-shot.none.drop .ph { align-content: center; gap: 2px; }
+.sc-shot.none.drop .ph small {
+  display: block; font-size: 9.5px; letter-spacing: .04em; text-transform: none; font-weight: 600; color: #94a3b8;
+}
+.sc-shot.none.drop:hover { border-color: #94a3b8; }
+.sc-shot.none.drop.over { border-color: var(--navy); border-style: solid; background: #eef3fb; }
+.sc-shot.none.drop.over .ph, .sc-shot.none.drop.busy .ph { color: var(--navy); }
+.sc-shot.none.drop.busy { cursor: progress; }
 
 /* The attributes section's header bar: title, the Y / N / · key, and the
    show/hide switch for the non-key fields. Sits ABOVE the section it explains. */

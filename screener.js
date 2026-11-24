@@ -84,6 +84,8 @@
     anchor: 0,
     photos: {},                    // cacheKey -> {slot: objectURL} | 'none'
     photoBusy: {},
+    photoUp: {},                   // 'subject:<slot>' / 'comp:<compId>:<slot>' -> true while uploading a drop
+    photoComp: null,               // the comp whose strip is on screen (the drop target's owner)
   };
 
   // ---------------------------------------------------------------- helpers
@@ -273,9 +275,17 @@
           ? { id: STATE.drive.compsFolderId }
           : await findFolderChild(STATE.drive.folderId, COMPS_FOLDER);
         if (compsFolder) {
-          const named = await findFolderChild(compsFolder.id, sanitizeFolderName(comp.name));
-          if (named) {
-            files = await listImages(named.id);
+          /* Same folder rule as the tab-2 Photos card (photos.js phCompFolder, read mode): exact name, else the
+             ONE unambiguous loose match (`Alma` -> `Alma Apartments`). So a photo dropped here lands in, and
+             is read back from, the folder tab 2 shows — never a second exact-name folder. */
+          let namedId = '';
+          if (window.PHOTOS && window.PHOTOS.compFolder) namedId = await window.PHOTOS.compFolder(comp, false);
+          else {
+            const n = await findFolderChild(compsFolder.id, sanitizeFolderName(comp.name));
+            namedId = n ? n.id : '';
+          }
+          if (namedId) {
+            files = await listImages(namedId);
           } else {
             const flat = await findFolderChild(compsFolder.id, 'photos');
             if (flat) {
@@ -750,8 +760,14 @@
   }
 
   // -------------------------------------------------------------- photo band
-  function photoStripHtml(set, label) {
+  /* `side` = 'subject' | 'comp'. An EMPTY tile (read finished, no photo) is a drop target and a click-to-pick
+     button (owner, 2026-11-24): the photo goes to the deal folder through photos.js phScreenerDrop, exactly where
+     the tab-1 / tab-2 Photos cards put it, then the strip re-reads Drive. Filled tiles are not targets — replacing
+     a photo stays on tab 1 / tab 2, where the ✕ and the full card are. */
+  function photoStripHtml(set, label, side) {
     const have = set && set !== 'none' ? Object.keys(set).length : 0;
+    const canDrop = !!(side && window.PHOTOS && window.PHOTOS.screenerDrop);
+    const owner = side === 'comp' && SC.photoComp ? SC.photoComp.compId + ':' : '';
     const tiles = PHOTO_SLOTS.map(s => {
       const src = set && set !== 'none' ? set[s] : null;
       if (src) {
@@ -759,8 +775,16 @@
           <div class="cap">${esc(s)}</div></div>`;
       }
       const pending = set == null;
-      return `<div class="sc-shot none"><div class="ph">${pending ? 'loading' : 'no photo'}</div>
+      const up = SC.photoUp[side + ':' + owner + s];
+      if (pending || !canDrop) {
+        return `<div class="sc-shot none"><div class="ph">${pending ? 'loading' : 'no photo'}</div>
         <div class="cap">${esc(s)}</div></div>`;
+      }
+      return `<div class="sc-shot none drop${up ? ' busy' : ''}" data-scdrop="${esc(side)}" data-scslot="${esc(s)}"
+        title="Drop a photo here, or click to choose one — saved to the deal folder on Drive">
+        <div class="ph">${up ? 'uploading…' : 'no photo<small>drop or click</small>'}</div>
+        <div class="cap">${esc(s)}</div>
+        <input type="file" accept="image/*" class="sc-pick" hidden /></div>`;
     }).join('');
     return `<div class="sc-phead"><span>${esc(label)}</span>
       <span class="cov">${set == null ? '' : have + '/' + PHOTO_SLOTS.length}</span></div>
@@ -801,6 +825,7 @@
       ? '<div class="sc-empty"><span>Internal comp — same property as the subject (left).</span></div>' : '';
     const other = showOther();
     const photos = showPhotos();
+    SC.photoComp = comp;
 
     host.innerHTML = `<div class="screener">
       ${railHtml()}
@@ -815,9 +840,9 @@
       </div>
       ${photos ? `<div class="sc-split sc-band4">
         <div class="sc-side left"><div class="sc-photos" id="sc-sphotos">${
-          photoStripHtml(SC.photos['subject'], 'Subject')}</div></div>
+          photoStripHtml(SC.photos['subject'], 'Subject', 'subject')}</div></div>
         <div class="sc-side"><div class="sc-photos" id="sc-cphotos">${
-          comp ? photoStripHtml(SC.photos['comp:' + comp.compId], 'Comp') : sameAsSubject}</div></div>
+          comp ? photoStripHtml(SC.photos['comp:' + comp.compId], 'Comp', 'comp') : sameAsSubject}</div></div>
       </div>` : ''}
       <div class="sc-legend">
         <b>Attributes</b>
@@ -838,15 +863,14 @@
     </div>`;
 
     wire();
-    if (photos) loadPhotos(comp);       // no Drive calls while the section is shut
+    if (photos) { wirePhotoDrops(); loadPhotos(comp); }   // no Drive calls while the section is shut
   }
 
   function loadPhotos(comp) {
     if (SC.photos['subject'] == null) {
       resolvePhotos('subject').then(set => {
         if (set == null) return;
-        const el = $('#sc-sphotos');
-        if (el && CURRENT_PHASE === 3) el.innerHTML = photoStripHtml(set, 'Subject');
+        repaintStrip('subject');
       });
     }
     if (comp) {
@@ -855,11 +879,71 @@
         const idx = sortedComps().indexOf(comp);
         resolvePhotos('comp', comp, idx).then(set => {
           if (set == null) return;
-          const el = $('#sc-cphotos');
-          if (el && CURRENT_PHASE === 3) el.innerHTML = photoStripHtml(set, 'Comp');
+          if (SC.photoComp !== comp) return;           // user moved to another comp meanwhile
+          repaintStrip('comp');
         });
       }
     }
+  }
+
+  /** Re-render one strip in place (still on Market Rents) and re-wire its drop targets. */
+  function repaintStrip(side) {
+    if (CURRENT_PHASE !== 3) return;
+    const el = $(side === 'subject' ? '#sc-sphotos' : '#sc-cphotos');
+    if (!el) return;
+    if (side === 'subject') el.innerHTML = photoStripHtml(SC.photos['subject'], 'Subject', 'subject');
+    else if (SC.photoComp) el.innerHTML = photoStripHtml(SC.photos['comp:' + SC.photoComp.compId], 'Comp', 'comp');
+    wirePhotoDrops();
+  }
+
+  /* Drop / click-to-pick on the empty tiles. Handlers are bound on the tiles each paint (they toggle a class on
+     the tile under the pointer). The whole photo band also swallows drops, so a photo let go between tiles does
+     not make the browser open the image and leave the page. */
+  function wirePhotoDrops() {
+    const band = $('#phase-content .sc-band4');
+    if (band && !band.dataset.guarded) {
+      band.dataset.guarded = '1';
+      band.addEventListener('dragover', ev => ev.preventDefault());
+      band.addEventListener('drop', ev => ev.preventDefault());
+    }
+    $$('#phase-content [data-scdrop]').forEach(el => {
+      const side = el.getAttribute('data-scdrop'), slot = el.getAttribute('data-scslot');
+      const send = files => dropPhoto(side, slot, files);
+      el.ondragover = ev => { ev.preventDefault(); el.classList.add('over'); };
+      el.ondragenter = ev => { ev.preventDefault(); el.classList.add('over'); };
+      el.ondragleave = () => el.classList.remove('over');
+      el.ondrop = ev => {
+        ev.preventDefault(); ev.stopPropagation(); el.classList.remove('over');
+        const dt = ev.dataTransfer;
+        if (dt && dt.files && dt.files.length) send(Array.from(dt.files));
+      };
+      const input = el.querySelector('input.sc-pick');
+      el.onclick = ev => { if (input && ev.target !== input) input.click(); };
+      if (input) input.onchange = () => {
+        const files = Array.from(input.files || []);   // copy BEFORE clearing: input.files is live
+        input.value = '';
+        if (files.length) send(files);
+      };
+    });
+  }
+
+  async function dropPhoto(side, slot, files) {
+    const comp = side === 'comp' ? SC.photoComp : null;
+    if (side === 'comp' && !comp) return;
+    const upKey = side + ':' + (comp ? comp.compId + ':' : '') + slot;
+    if (SC.photoUp[upKey]) return;
+    SC.photoUp[upKey] = true;
+    repaintStrip(side);
+    let ok = false;
+    try { ok = await window.PHOTOS.screenerDrop(side, comp, slot, files); }
+    finally { delete SC.photoUp[upKey]; }
+    if (ok) {
+      /* phScreenerDrop already dropped the cached strip; read Drive again for the side that changed. */
+      if (side === 'subject') delete SC.photos['subject'];
+      else delete SC.photos['comp:' + comp.compId];
+      if (CURRENT_PHASE === 3 && showPhotos()) loadPhotos(side === 'comp' ? (SC.photoComp === comp ? comp : null) : null);
+    }
+    if (side === 'subject' || SC.photoComp === comp) repaintStrip(side);
   }
 
   function wire() {
