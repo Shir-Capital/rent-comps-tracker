@@ -495,11 +495,20 @@
       const us = x.units.slice().sort((a, b) => (b.move_in || '').localeCompare(a.move_in || '') || String(a.unit).localeCompare(String(b.unit)));
       return `<tr class="sc-iunits"><td colspan="8"><table class="sc-mix sc-iutab">
         <thead><tr><th class="l">Unit</th><th>SF</th><th>Move-in</th><th>LXP</th><th>Eff. $</th><th class="l">Counted</th></tr></thead>
-        <tbody>${us.map(u => `<tr class="${u.excluded ? 'out' : 'in'}">
+        <tbody>${us.map(u => {
+          /* A lease that passes the filters gets a checkbox: untick it to drop it
+             from the averages (saved on the record). A filtered-out one just says why. */
+          const can = !u.excluded || u.excluded === 'unchecked';
+          const last = can
+            ? `<label class="sc-uchk"><input type="checkbox" data-scunit="${esc(u.key)}"${u.excluded ? '' : ' checked'}
+                 aria-label="Count unit ${esc(u.unit || '')} in the average"/>${u.excluded ? '<span>unchecked</span>' : ''}</label>`
+            : esc(why(u.excluded));
+          return `<tr class="${u.excluded ? 'out' : 'in'}${u.excluded === 'unchecked' ? ' man' : ''}">
           <td class="l">${esc(u.unit || '—')}</td><td>${u.sf ? int(num(u.sf)) : '—'}</td>
           <td>${esc(fmtDate(u.move_in))}</td><td>${esc(fmtDate(u.lxp))}</td>
           <td class="rent">${u.eff ? money(num(u.eff)) : '—'}</td>
-          <td class="l">${u.excluded ? esc(why(u.excluded)) : '✓'}</td></tr>`).join('')}</tbody></table></td></tr>`;
+          <td class="l">${last}</td></tr>`;
+        }).join('')}</tbody></table></td></tr>`;
     };
     const body = ic.rows.map((x, i) => {
       const d = aRent > 0 && x.rent != null ? x.rent - aRent : null;
@@ -508,7 +517,8 @@
         <td class="l plan"><span class="sc-chev">${x.total ? (open ? '▾' : '▸') : ''}</span>${esc(x.plan || '—')}</td>
         <td class="l"><span class="sc-st ${statusClass(x.status)}">${esc(x.status || '—')}</span></td>
         <td>${x.sf ? int(x.sf) : '—'}</td>
-        <td title="${x.leases} of ${x.total} ${esc(x.plan)} ${esc(x.status)} units pass the filters">${x.leases}<span class="muted">/${x.total}</span></td>
+        <td title="${x.leases} of ${x.total} ${esc(x.plan)} ${esc(x.status)} units counted${x.unchecked ? ' (' + x.unchecked + ' unchecked by hand)' : ''}">${x.leases}<span class="muted">/${x.total}</span>${
+          x.unchecked ? `<span class="sc-ioff">−${x.unchecked}</span>` : ''}</td>
         <td>${x.lxp ? esc(fmtDate(x.lxp)) : '—'}</td>
         <td class="rent">${x.rent != null ? money(x.rent) : '—'}</td>
         <td class="psf">${x.psf != null ? '$' + x.psf.toFixed(2) : '—'}</td>
@@ -536,6 +546,8 @@
         <div class="kv"><span class="k">Avg LXP</span><span class="v">${s.lxp ? esc(fmtDate(s.lxp)) : '—'}</span></div>
         <div class="kv"><span class="k">vs in-place</span><span class="v ${gap >= 0 ? 'up' : 'dn'}">${
           gap ? (gap > 0 ? '+' : '−') + money(Math.abs(gap)).slice(1) : '—'}</span></div>
+        ${ic.uncheckedAll ? `<span class="sc-inote" title="Leases unticked by hand are left out of the averages. The proforma's Internal block has no such switch, so these figures now differ from it.">${ic.uncheckedAll} lease${ic.uncheckedAll === 1 ? '' : 's'} unchecked by hand — differs from the proforma</span>
+        <button type="button" id="sc-int-recheck" class="sc-other" title="Count every lease that passes the filters again">Re-check all</button>` : ''}
         <button type="button" id="sc-int-expand" class="sc-other" title="Show or hide every unit under every plan row">${anyOpen ? 'Collapse all' : 'Expand all'}</button>
         <button type="button" id="sc-int-list" class="sc-other">${SC.showLeases ? 'Hide' : 'Show'} the ${leases.length} lease${leases.length === 1 ? '' : 's'}</button>
       </div>${list2}`;
@@ -927,6 +939,20 @@
         renderScreener();
       };
     });
+    /* Hand-untick a lease (saved on the record, pushed to Drive). The click must
+       not bubble to anything that re-renders first. */
+    $$('#sc-comp [data-scunit]').forEach(cb => {
+      cb.onclick = e => e.stopPropagation();
+      cb.onchange = () => {
+        const cur = internalCompSettings();
+        const ex = Object.assign({}, cur.excluded || {});
+        const k = cb.getAttribute('data-scunit');
+        if (cb.checked) delete ex[k]; else ex[k] = true;
+        setInt({ excluded: ex });
+      };
+    });
+    const rechk = $('#sc-int-recheck');
+    if (rechk) rechk.onclick = () => setInt({ excluded: {} });
     const exp = $('#sc-int-expand');
     if (exp) exp.onclick = () => {
       if (!ic) return;

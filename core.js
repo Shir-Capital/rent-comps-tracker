@@ -749,6 +749,14 @@ function edateISO(iso, months) {
   return y + '-' + String(mo + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
 }
 
+/** A lease's identity for the hand-untick list: its unit number (unique on a
+    rent roll, and stable across a re-import of the same RR), else plan + finish
+    + move-in + LXP for a row with no unit number. */
+function internalLeaseKey(l) {
+  const u = String(l && l.unit != null ? l.unit : '').trim();
+  return u ? 'u:' + u : 'r:' + [l.plan, l.finish, l.move_in, l.lxp].join('|');
+}
+
 /** The open record's filter settings, defaults filled. */
 function internalCompSettings() {
   const s = (STATE && STATE.internalComp) || {};
@@ -770,6 +778,12 @@ function internalCompFor(bucketKey, today) {
   const cutoff = lb === '' || !isFinite(Number(lb)) ? '' : edateISO(today || todayLocalISO(), 12 - Number(lb));
   const after = /^\d{4}-\d{2}-\d{2}$/.test(String(set.moveInAfter || '')) ? set.moveInAfter : '';
   const norm = s => String(s == null ? '' : s).trim().toLowerCase();
+  /* Leases the analyst unticked by hand (2026-11-23), keyed by internalLeaseKey.
+     Only a lease that passes the filters can be unticked; it then drops out of
+     the averages like a filtered one, with the reason 'unchecked'. The proforma
+     has no such switch, so with any unticked the numbers deliberately differ
+     from its Internal block — the pane says so. */
+  const off = set.excluded && typeof set.excluded === 'object' ? set.excluded : {};
   const subj = (groupByBucket(STATE ? STATE.subjectUnitMix : [])[bucketKey]) || [];
   const avg = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   const matched = [];
@@ -785,9 +799,10 @@ function internalCompFor(bucketKey, today) {
       if (cutoff && l.lxp < cutoff) return 'LXP before ' + cutoff;
       if (!l.move_in) return 'no move-in';                                 // Move In >= after (blank -> ">=1")
       if (after && l.move_in < after) return 'moved in before ' + after;
+      if (off[internalLeaseKey(l)]) return 'unchecked';
       return '';
     };
-    const units = same.map(l => Object.assign({}, l, { excluded: why(l) }));
+    const units = same.map(l => Object.assign({}, l, { key: internalLeaseKey(l), excluded: why(l) }));
     const hit = units.filter(l => !l.excluded);
     hit.forEach(l => matched.push(l));
     const sf = avg(sfs);
@@ -798,6 +813,7 @@ function internalCompFor(bucketKey, today) {
       sf, rent, psf: rent != null && sf ? rent / sf : null,
       lxp: lxpS == null ? '' : xlSerialToISO(lxpS), leases: hit.length, total: same.length,
       units,                                // every unit of this plan + finish, each with `excluded`
+      unchecked: units.filter(u => u.excluded === 'unchecked').length,
     };
   });
   const vals = k => rows.map(x => x[k]).filter(v => v != null && v !== '');
@@ -805,6 +821,8 @@ function internalCompFor(bucketKey, today) {
   const secLxp = avg(rows.map(x => isoToXlSerial(x.lxp)).filter(v => v != null));
   return {
     rows, matched, cutoff, moveInAfter: after, lookbackMonths: lb,
+    unchecked: rows.reduce((a, x) => a + x.unchecked, 0),
+    uncheckedAll: Object.keys(off).filter(k => off[k]).length,
     leaseCount: L.length, hasLeases: L.length > 0,
     section: { sf: secSf, rent: secRent, psf: secRent != null && secSf ? secRent / secSf : null,
                lxp: secLxp == null ? '' : xlSerialToISO(secLxp) },

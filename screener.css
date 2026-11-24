@@ -130,6 +130,13 @@ table.sc-iutab { width: 100%; font-size: 11.5px; }
 table.sc-iutab th { font-size: 10px; }
 table.sc-iutab tr.out td { color: #94a3b8; }
 table.sc-iutab tr.in td:last-child { color: #15803d; font-weight: 700; }
+/* Hand-untick a lease from the averages. */
+.sc-uchk { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.sc-uchk input { width: 14px; height: 14px; margin: 0; accent-color: #15803d; cursor: pointer; }
+table.sc-iutab tr.man td { color: #b45309; text-decoration: line-through; text-decoration-color: #f59e0b; }
+table.sc-iutab tr.man td:last-child { text-decoration: none; }
+.sc-ioff { margin-left: 4px; color: #b45309; font-weight: 700; font-size: 11px; }
+.sc-inote { color: #b45309; font-size: 11.5px; font-weight: 600; }
 .sc-foot .sc-other { margin-left: auto; }
 
 .sc-body { flex: 1 1 auto; overflow-y: auto; }
@@ -363,4 +370,5 @@ table.sc-arow tr:hover td { background: #fafbfd; }
   .screener .sc-body, .screener .sc-ileases { overflow-x: auto; }
   .sc-ifilt input { font-size: 16px; padding: 6px; }
   .sc-ifilt input[type="number"] { width: 64px; }
+  .sc-uchk input { width: 22px; height: 22px; }
 }
