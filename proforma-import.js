@@ -206,7 +206,7 @@ function pfDisplayNames(list, dealName) {
   }));
 }
 
-/** Drive modifiedTime -> "Nov 19, 2026, 4:50 PM" in the viewer's own time zone. */
+/** A Drive timestamp -> "Nov 19, 2026, 4:50 PM" in the viewer's own time zone. */
 function pfModified(iso) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -242,7 +242,9 @@ async function pfFindCandidates(dealFolderId) {
 
   const out = [];
   for (const f of folders) {
-    for (const file of await listFiles(f.id)) {
+    const listed = await driveList(`'${f.id}' in parents and trashed=false`,
+      'id,name,mimeType,modifiedTime,size,headRevisionId');
+    for (const file of listed) {
       if (!PF_STATE_FILE_RE.test(file.name)) continue;
       const low = file.name.toLowerCase();
       if (PF_EXCLUDE.some(t => low.includes(t))) continue;
@@ -253,16 +255,46 @@ async function pfFindCandidates(dealFolderId) {
            one, so the photo lookup needs to know where this file came from. */
         folderId: f.id,
         modifiedTime: file.modifiedTime, size: Number(file.size || 0),
+        /* Drive's own modifiedTime, kept for the import stamp. `modifiedTime` above is replaced by the content
+           date in pfContentDates below. */
+        driveModifiedTime: file.modifiedTime, headRevisionId: file.headRevisionId || '',
         tier: pfClassify(file.name), version: pfVersion(file.name), type: pfFileType(file.name),
       });
     }
   }
+  await pfContentDates(out);
   out.sort(pfCmp);
   if (!out.length && !uw) {
     throw new Error('No proforma-looking workbook in this folder or its subfolders '
       + '(and it has no "2. UW-Analysis")');
   }
   return out;
+}
+
+/* "Modified" = when the workbook's CONTENT last changed (owner, 2026-11-24: "make sure the date modified shown in
+   the Rent Comps Tracker is matching the date modified from Windows File Explorer").
+   Drive's file `modifiedTime` also moves on metadata-only writes: on 2026-11-21 ~1:15-1:40 PM CT one bulk write
+   re-stamped it on most workbooks of 19 of the 20 live deals (Mia Riverside: 19 files all "Nov 21" with no new
+   revision and the same md5). Windows Explorer (Drive for desktop) keeps the date the content last changed, which is
+   the HEAD REVISION's modifiedTime. Checked 2026-11-24: Mia Riverside 49 / 51 workbooks head revision == Explorer
+   (31 / 51 for file modifiedTime), Copper Mill 10 / 11 (9 / 11); the misses were a 2-3 minute offset and one
+   no-change re-save that Explorer counts and the revision list does not.
+   One revisions.get per workbook, PF_REV_CONCURRENCY at a time; a failure leaves Drive's modifiedTime. */
+const PF_REV_CONCURRENCY = 6;
+async function pfContentDates(files) {
+  const todo = files.filter(f => f.headRevisionId);
+  let i = 0;
+  async function worker() {
+    while (i < todo.length) {
+      const f = todo[i++];
+      try {
+        const r = await driveFetch('/drive/v3/files/' + encodeURIComponent(f.id) + '/revisions/'
+          + encodeURIComponent(f.headRevisionId) + '?fields=modifiedTime&supportsAllDrives=true');
+        if (r && r.modifiedTime) { f.contentModifiedTime = r.modifiedTime; f.modifiedTime = r.modifiedTime; }
+      } catch (e) { /* keep Drive's modifiedTime */ }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(PF_REV_CONCURRENCY, todo.length) }, worker));
 }
 
 // ------------------------------------------------------- workbook plumbing
@@ -1489,7 +1521,9 @@ function pfFileRowHtml(f, checked, shown) {
   const meta = [pfTypeLabel(f), ver,
     f.modifiedTime ? (pfModified(f.modifiedTime) || '') + ' (' + relTime(f.modifiedTime) + ')' : 'modified —',
     f.sub].filter(Boolean).map(esc).join(' · ');
-  const title = f.name + (f.modifiedTime ? '\nModified ' + f.modifiedTime : '') + (f.sub ? '\nIn ' + f.sub : '');
+  const title = f.name + (f.modifiedTime ? '\nModified (content) ' + f.modifiedTime : '')
+    + (f.driveModifiedTime && f.driveModifiedTime !== f.modifiedTime ? '\nDrive metadata touched ' + f.driveModifiedTime : '')
+    + (f.sub ? '\nIn ' + f.sub : '');
   return `<label class="pf-file${checked ? ' sel' : ''}" title="${esc(title)}">
     <input type="radio" name="pf-file" value="${esc(f.id)}"${checked ? ' checked' : ''}/>
     <span class="pf-file-main">
@@ -1861,7 +1895,8 @@ function pfApply() {
   }
   const rec = () => ({
     fileId: f ? f.id : '', fileName: f ? f.name : '',
-    driveModifiedTime: f ? f.modifiedTime : '',
+    driveModifiedTime: f ? (f.driveModifiedTime || f.modifiedTime) : '',
+    contentModifiedTime: f ? (f.contentModifiedTime || '') : '',
     importedAt: nowISO(),
     importedBy: (typeof CURRENT_USER === 'object' && CURRENT_USER && CURRENT_USER.email) || '',
   });
