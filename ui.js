@@ -945,7 +945,10 @@ function renderHome() {
 
   const header = homeHeaderHtml(archivedCount, !!(local.length || remoteOnly.length));
 
-  const cards = local.map(p => {
+  const cards = local.map(p0 => {
+    /* The counts of the version this device would open (versions.js). */
+    const p = typeof homeVersionView === 'function' ? homeVersionView(p0) : p0;
+    const nv = typeof versionCountFor === 'function' ? versionCountFor(p0.id) : 1;
     const rents = (function () {
       const prev = STATE; STATE = p;
       let n = 0;
@@ -961,6 +964,7 @@ function renderHome() {
         <div class="psub">${esc(p.drive.folderName || 'no Drive folder linked')} · edited ${esc(relTime(p.updated))}</div>
         <div class="badges">
           <span class="badge">${(p.comps || []).length}/${MAX_COMPS} comps</span>
+          ${nv > 1 ? '<span class="badge" title="Versions of the comps and market rents; the counts are for ' + esc(p._versionLabel || '') + '">' + nv + ' versions</span>' : ''}
           <span class="badge ${direct >= 4 ? 'b-ok' : 'b-warn'}">${direct} direct</span>
           <span class="badge ${rents > 0 ? 'b-direct' : ''}">${rents}/${BUCKETS.length} rents</span>
           ${p.drive.folderId ? '' : '<span class="badge b-warn">unlinked</span>'}
@@ -981,6 +985,7 @@ function renderHome() {
           <span class="badge b-cloud">on Drive</span>
           <span class="badge">${e.compCount || 0} comps</span>
           <span class="badge">${e.directCompCount || 0} direct</span>
+          ${(e.versionCount || 1) > 1 ? '<span class="badge">' + e.versionCount + ' versions</span>' : ''}
         </div>
       </div>
       <span class="muted">›</span>
@@ -1041,6 +1046,7 @@ async function refreshHomeIndex() {
 
 function showHome() {
   STATE = null;
+  if (typeof renderVersionStrip === 'function') renderVersionStrip();
   STORE.currentPropertyId = null;
   saveStore();
   stopAutoSync();
@@ -1058,6 +1064,7 @@ function showHome() {
 function openProperty(id, opts) {
   const p = hydrateProperty(STORE.properties[id]);
   if (!p) { showHome(); return; }
+  if (typeof attachVersionForOpen === 'function') attachVersionForOpen(p);   // comps + market rents of a version
   STATE = p;
   STORE.currentPropertyId = id;
   saveStore();
@@ -1075,7 +1082,7 @@ function openProperty(id, opts) {
   updateFolderStatus();
   updateSyncStatus();
   startAutoSync();
-  reconcileFromDrive();
+  Promise.resolve(reconcileFromDrive()).then(() => { if (typeof versionsOnOpen === 'function') return versionsOnOpen(); });
   maybeAutoLinkFolder();
 }
 
@@ -1111,6 +1118,7 @@ async function openRemoteProperty(entry) {
 }
 
 function closeProperty() {
+  if (typeof releaseVersionHeartbeat === 'function' && typeof CURRENT_VERSION !== 'undefined') releaseVersionHeartbeat(CURRENT_VERSION);
   releaseEditorLock();
   showHome();
   setHash('#/');
@@ -1128,6 +1136,7 @@ function renderCurrentPhase() {
   else if (CURRENT_PHASE === 2) renderPhase2();
   else if (CURRENT_PHASE === 3) renderPhase3();
   else renderPhase4();
+  if (typeof renderVersionStrip === 'function') renderVersionStrip();
 }
 
 function gotoPhase(phase) {

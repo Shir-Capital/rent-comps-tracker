@@ -295,7 +295,10 @@ function loadStore() {
 
 function saveStore() {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(STORE));
+    /* A subject with versions keeps its comps / market rents in STORE.versions
+       only (versions.js storeForPersist), not twice. */
+    const out = typeof storeForPersist === 'function' ? storeForPersist(STORE) : STORE;
+    localStorage.setItem(STORE_KEY, JSON.stringify(out));
   } catch (e) {
     console.error('saveStore failed', e);
     toast('⚠ Local storage full — export and clear old properties');
@@ -308,9 +311,15 @@ function saveStore() {
  */
 function saveState(opts) {
   if (!STATE) return;
-  STATE.updated = nowISO();
-  if (typeof CURRENT_USER === 'object' && CURRENT_USER && CURRENT_USER.email) {
-    STATE.lastEditor = CURRENT_USER.email;
+  const me = (typeof CURRENT_USER === 'object' && CURRENT_USER && CURRENT_USER.email) || '';
+  /* Versions (2026-11-24): the comps / market rents go back to the open version,
+     which stamps ITS own time when they changed; the shared record's `updated`
+     moves only when a shared field changed, so each Drive file is pushed only
+     when it really has news. null = versions not in play: the old behaviour. */
+  const split = typeof versionTrackSave === 'function' ? versionTrackSave(STATE, me) : null;
+  if (!split || split.shared) {
+    STATE.updated = nowISO();
+    if (me) STATE.lastEditor = me;
   }
   saveStore();
   if (!(opts && opts.noPush) && typeof scheduleAutoPush === 'function') {
@@ -436,6 +445,7 @@ function newProperty(name) {
     comps: [],
     marketRents: {},   // bucketKey -> { override: '' }
     imports: {},       // group -> { fileName, fileId, importedAt, ... }
+    _versioned: 1,     // comps / market rents live in versions (versions.js) from the start
   };
   STORE.properties[id] = p;
   STORE.currentPropertyId = id;

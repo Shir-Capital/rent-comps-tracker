@@ -485,7 +485,8 @@ async function linkDealFolder(p, folderId, folderName, pipelineName) {
 }
 
 // ------------------------------------------------------------- push / pull
-/** The JSON body written to Drive. Excludes nothing — it IS the record. */
+/** The FULL record (shared + the open version's comps): backups and exports.
+    The shared Drive file is sharedPayload() (versions.js). */
 function serializeProperty(p) {
   const out = JSON.parse(JSON.stringify(p));
   out._app = 'rent-comps-tracker';
@@ -509,6 +510,38 @@ async function pushToDrive(opts) {
   try {
     const folder = await ensureTrackerFolder(STATE);
 
+    /* Versions (2026-11-24): the open version's file goes FIRST — the shared
+       file is written without the comps, so they must already be on Drive. A
+       subject still in the pre-versions shape is split here (migrateLegacyVersion);
+       until that succeeds the shared file is not touched. */
+    const V = (typeof CURRENT_VERSION !== 'undefined' && CURRENT_VERSION && CURRENT_VERSION.propertyId === STATE.id) ? CURRENT_VERSION : null;
+    let versionOk = true, versionWrote = false;
+    if (V) {
+      if (V._legacySplit) versionOk = await migrateLegacyVersion(STATE, CURRENT_VERSION);
+      else if (versionIsDirty(V) || (!silent && !V.provisional && !V._stub)) {
+        const vr = await pushVersionToDrive(V, { silent });
+        if (vr === 'conflict') {
+          versionOk = false;
+          showSyncBar('⚠️ <b>Drive has a newer copy of version “' + esc(V.label) + '”</b>, and this device has unsynced edits to it. One of the two has to win.', {
+            reason: 'vconflict',
+            actions: [
+              { key: 'vpull', cls: 'primary', label: '↓ Take the Drive version', title: "Loads Drive's copy of this version (this device's copy goes to Backups first)" },
+              { key: 'vpush', cls: 'danger', label: '↑ Keep this device’s version', title: 'Overwrites the newer Drive copy of this version' },
+            ],
+          });
+        } else if (vr === false) versionOk = false;
+        else if (vr === true) versionWrote = true;
+      }
+    }
+    const sharedDirty = !STATE.drive.fileId || !STATE.drive.lastPushed
+      || String(STATE.updated || '') > String(STATE.drive.lastPushed) || !!STATE.drive.sharedNeedsRewrite || !silent;
+    if (!sharedDirty || (V && V._legacySplit)) {
+      if (versionWrote) { saveStore(); await upsertManifestEntry(STATE); }
+      if (!silent && versionOk) toast('Saved to Drive');
+      updateSyncStatus();
+      return versionOk;
+    }
+
     // Locate the remote file if we do not have its id cached.
     if (!STATE.drive.fileId) {
       const hits = await driveList(
@@ -528,8 +561,10 @@ async function pushToDrive(opts) {
       } catch (e) { /* fall through and write */ }
     }
 
-    const r = await driveUploadJson(folder, STATE_FILENAME, serializeProperty(STATE), STATE.drive.fileId);
+    const r = await driveUploadJson(folder, STATE_FILENAME,
+      typeof sharedPayload === 'function' ? sharedPayload(STATE) : serializeProperty(STATE), STATE.drive.fileId);
     STATE.drive.fileId = r.id;
+    STATE.drive.sharedNeedsRewrite = false;
     STATE.drive.lastPushed = nowISO();
     STATE.drive.remoteModifiedTime = r.modifiedTime || nowISO();
     saveStore();
@@ -537,9 +572,9 @@ async function pushToDrive(opts) {
     // Dated backup, throttled. Never allowed to fail the save.
     try { await writeBackup(STATE, { force: !silent && !!(opts && opts.forceBackup) }); }
     catch (e) { console.warn('backup skipped', e); }
-    if (!silent) toast('Saved to Drive');
+    if (!silent) toast(versionOk ? 'Saved to Drive' : 'Subject saved to Drive; the version did not save — see the bar above');
     updateSyncStatus();
-    return true;
+    return versionOk;
   } catch (e) {
     console.error('pushToDrive', e);
     if (!silent) toast('Save failed: ' + (e.message || e));
@@ -578,7 +613,11 @@ async function writeBackup(p, opts) {
   const folder = await driveEnsureSubfolder(p.drive.trackerFolderId, BACKUP_FOLDER);
   p.drive.backupFolderId = folder;
 
-  const name = `rent_comps_${propertySlug(p)}_${today}.json`;
+  /* One per VERSION per day (2026-11-24): the backup is the full record, so it
+     carries the open version's comps and is named for it. */
+  const vl = (typeof CURRENT_VERSION !== 'undefined' && CURRENT_VERSION && CURRENT_VERSION.propertyId === p.id)
+    ? '_' + String(CURRENT_VERSION.label || '').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') : '';
+  const name = `rent_comps_${propertySlug(p)}${vl}_${today}.json`;
   const safe = name.replace(/'/g, "\\'");
   const hits = await driveList(
     `'${folder}' in parents and name='${safe}' and trashed=false`, 'id,name');
@@ -597,8 +636,9 @@ async function pruneBackups(folderId) {
     const files = await driveList(
       `'${folderId}' in parents and trashed=false`, 'id,name,modifiedTime');
     if (files.length <= BACKUP_KEEP) return;
-    // Filenames end in the ISO date, so a plain name sort is chronological.
-    files.sort((a, b) => String(b.name).localeCompare(String(a.name)));
+    // Newest first by Drive's own time: with one file per version per day the
+    // names no longer sort chronologically.
+    files.sort((a, b) => String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || '')));
     for (const f of files.slice(BACKUP_KEEP)) {
       await driveRaw('/drive/v3/files/' + f.id + '?supportsAllDrives=true', { method: 'DELETE' });
     }
@@ -629,6 +669,8 @@ function cancelAutoPush() {
 
 function deviceIsDirty() {
   if (!STATE) return false;
+  if (typeof CURRENT_VERSION !== 'undefined' && CURRENT_VERSION && CURRENT_VERSION.propertyId === STATE.id
+      && (CURRENT_VERSION._legacySplit || versionIsDirty(CURRENT_VERSION))) return true;
   const pushed = STATE.drive.lastPushed;
   if (!pushed) return true;
   return String(STATE.updated || '') > String(pushed);
@@ -672,6 +714,11 @@ async function pullFromDrive(opts) {
       lastPushed: meta.modifiedTime,
     });
     const merged = hydrateProperty(Object.assign({}, remote, { id: localId, drive: keepDrive }));
+    /* Versions: the shared file carries no comps — keep the open version's. */
+    if (typeof CURRENT_VERSION !== 'undefined' && CURRENT_VERSION && CURRENT_VERSION.propertyId === localId) {
+      if (STATE && STATE._versioned) merged._versioned = 1;
+      composeVersion(merged, CURRENT_VERSION);
+    }
     STORE.properties[localId] = merged;
     STATE = merged;
     saveStore();
@@ -839,6 +886,20 @@ async function runSyncAction(key) {
     return;
   }
 
+  if (key === 'vpull' || key === 'vpush') {
+    const V = typeof CURRENT_VERSION !== 'undefined' ? CURRENT_VERSION : null;
+    if (!V) { hideSyncBar(); return; }
+    if (key === 'vpull') {
+      if (!confirm('Take the Drive copy of version "' + V.label + '"?\n\nThis device\'s unsynced edits to it are replaced (a dated backup is written first).')) return;
+      try { await writeBackup(STATE, { force: true }); } catch (e) { if (!confirm('The backup failed. Take the Drive copy anyway?')) return; }
+      if (await pullVersionFromDrive(V, { silent: true })) { hideSyncBar(); toast('Now on the Drive copy of "' + V.label + '"'); }
+    } else {
+      if (!confirm('Keep this device\'s copy of version "' + V.label + '"?\n\nThe NEWER copy on Drive is overwritten.')) return;
+      if ((await pushVersionToDrive(V, { force: true })) === true) { hideSyncBar(); toast('Drive now has this device’s copy of "' + V.label + '"'); }
+    }
+    return;
+  }
+
   if (key === 'push') {
     if (!confirm('Keep this device\'s version of "' + STATE.name + '"?\n\n'
       + 'The NEWER copy on Drive is overwritten — whoever made those edits loses '
@@ -904,6 +965,7 @@ function manifestEntryFor(p) {
     currentEditor: (CURRENT_USER && CURRENT_USER.email) || '',
     currentEditorHeartbeatAt: nowISO(),
     compCount: (p.comps || []).length,
+    versionCount: typeof versionCountFor === 'function' ? Math.max(1, versionCountFor(p.id)) : 1,
     directCompCount: (p.comps || []).filter(c => c.category === 'direct').length,
     subjectUnitTypes: (p.subjectUnitMix || []).length,
     bucketsPriced: rents.filter(r => r.effective > 0).length,
@@ -925,6 +987,8 @@ async function upsertManifestEntry(p) {
     const i = list.findIndex(x => x.id === entry.id);
     if (i >= 0) list[i] = Object.assign({}, list[i], entry);
     else list.push(entry);
+    if (typeof CURRENT_VERSION !== 'undefined' && CURRENT_VERSION && CURRENT_VERSION.propertyId === p.id
+        && STATE && STATE.id === p.id) upsertVersionRowInto(m.data, CURRENT_VERSION, true);
     m.data.updatedAt = nowISO();
     const r = await driveUploadJson(SYNC_FOLDER_ID, MANIFEST_FILENAME, m.data, m.fileId || undefined);
     m.fileId = r.id;
@@ -1071,9 +1135,13 @@ async function syncTick() {
       if (e && e.currentEditor && e.currentEditor !== me && e.currentEditorHeartbeatAt) {
         const age = Date.now() - new Date(e.currentEditorHeartbeatAt).getTime();
         if (age < HEARTBEAT_STALE_MS) {
-          showSyncBar('⚠️ <b>' + esc(e.currentEditor) + '</b> is also editing this property '
-            + '(active ' + esc(relTime(e.currentEditorHeartbeatAt)) + ') — your edits may '
-            + 'overwrite theirs.', {
+          const sameV = typeof versionCoEditor === 'function' ? versionCoEditor(STATE.id) : null;
+          const multi = typeof versionCountFor === 'function' && versionCountFor(STATE.id) > 1;
+          /* Never cover a conflict bar (subject or version): its buttons are the way out of it. */
+          if (!(SYNC_BAR && /conflict$/.test(SYNC_BAR.reason))) showSyncBar('⚠️ <b>' + esc(e.currentEditor) + '</b> is also editing this property '
+            + '(active ' + esc(relTime(e.currentEditorHeartbeatAt)) + ')'
+            + (multi && !sameV ? ' in another version — the subject is shared, the comps are not.'
+              : ' — your edits may overwrite theirs.'), {
             reason: 'coeditor',
             actions: [
               { key: 'recheck', cls: 'primary', label: '↻ Check again',

@@ -262,6 +262,7 @@ function wireDrawer() {
     cancelAutoPush();
     stopAutoSync();
     delete STORE.properties[id];
+    if (typeof dropLocalVersionsFor === 'function') dropLocalVersionsFor(id);
     saveStore();
     await removeManifestEntry(id);
     closeDrawer();
@@ -334,6 +335,7 @@ async function boot() {
   wireHeader();
   wireHomeDelegation();
   wireDrawer();
+  if (typeof wireVersionStrip === 'function') wireVersionStrip();
 
   window.addEventListener('hashchange', routeFromHash);
 
@@ -344,7 +346,10 @@ async function boot() {
   if (resumed) {
     refreshHomeIndex();
     tryOpenPendingDeepLink();
-    if (STATE) { reconcileFromDrive(); startAutoSync(); maybeAutoLinkFolder(); }
+    if (STATE) {
+      Promise.resolve(reconcileFromDrive()).then(() => { if (typeof versionsOnOpen === 'function') return versionsOnOpen(); });
+      startAutoSync(); maybeAutoLinkFolder();
+    }
   }
 }
 

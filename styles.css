@@ -1106,3 +1106,17 @@ button.btn:disabled { opacity: .5; cursor: not-allowed; }
    part of the 900px block above, because the two-column attributes row reaches
    three pairs across much sooner than the old three-card row did. Nothing else
    was in this query. */
+
+/* Versions of the comps + market rents (versions.js, 2026-11-24): a pill strip
+   above tabs 2-4, the tabs whose data a version holds. */
+.version-strip { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; overflow-x: auto;
+  padding: 7px 14px; background: #0f172a; border-bottom: 1px solid #1e293b; }
+.version-strip.hidden { display: none; }
+.version-strip .vlab { color: #94a3b8; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; margin-right: 2px; white-space: nowrap; }
+.version-strip .vpill { white-space: nowrap; font: 600 12px/1.2 inherit; font-family: inherit; padding: 5px 12px; border-radius: 14px; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.35); background: transparent; color: #fff; }
+.version-strip .vpill.on { background: #fff; color: #0f172a; border-color: #fff; }
+.version-strip .vpill.vnew { border-style: dashed; border-color: rgba(255,255,255,.5); font-weight: 700; }
+.version-strip .vpill.vmgr { margin-left: auto; }
+.version-strip .vdot { color: #f59e0b; font-size: 9px; vertical-align: middle; }
+@media (max-width: 600px) { .version-strip .vpill { padding: 7px 12px; font-size: 13px; } }
