@@ -572,6 +572,70 @@ function feeTableHtml(items, obj, path) {
   }).join('') + `</div>`;
 }
 
+/* The named mandatory fees (open Mandatory Fees slots, template v76): one row per fee — its name and $/Mo — up
+   to FEE_EXTRA_MAX, under the five fixed fees. The name is free text with the template's own dropdown words
+   offered (datalist). Edited through one document-level handler (wireExtraFees) on data-xf* attributes. */
+const FEE_HIDDEN_KEYS = ['other', 'other_label', 'pest'];   // moved into fees.extra by normalizeExtraFees()
+function extraFeesHtml(fees, path) {
+  const list = fees && Array.isArray(fees.extra) ? fees.extra : [];
+  const fixed = (SCHEMA.fees || []).filter(f => f.compsLabel).map(f => f.compsLabel.toLowerCase());
+  const words = (SCHEMA.feeVocabulary || []).filter(v => fixed.indexOf(String(v).toLowerCase()) === -1)
+    .concat(['Pest Control', 'Utility Bill Fee', 'Property Liability Fee', 'Community Fee']);
+  const rows = list.map((x, i) => `<div class="xfee-row">
+      <input type="text" list="fee-extra-vocab" data-xfpath="${esc(path)}" data-xfi="${i}" data-xff="label"
+        value="${esc(x.label)}" placeholder="Fee name, e.g. Pest Control" aria-label="Fee name" />
+      <input type="number" step="any" inputmode="decimal" data-xfpath="${esc(path)}" data-xfi="${i}" data-xff="amount"
+        value="${esc(x.amount)}" placeholder="$/Mo" aria-label="$ per month" />
+      <button type="button" class="xfee-del" data-xfpath="${esc(path)}" data-xfdel="${i}" title="Remove this fee">✕</button>
+    </div>`).join('');
+  return `<div class="xfees" data-xfees="${esc(path)}">
+    <div class="sub-label" title="Mandatory monthly fees other than the five above (Pest Control, Property Liability Fee, …). Each goes to an open Mandatory Fees slot on the COMPS tab (template v76: up to ${FEE_EXTRA_MAX}), labelled with its name, and is summed into Eff. $/Mo.">Other mandatory fees <span class="muted">${list.length} / ${FEE_EXTRA_MAX}</span></div>
+    ${rows}
+    <button type="button" class="btn small" data-xfadd="${esc(path)}"${list.length >= FEE_EXTRA_MAX ? ' disabled' : ''}>+ Add mandatory fee</button>
+    <datalist id="fee-extra-vocab">${words.map(w => '<option value="' + esc(w) + '"></option>').join('')}</datalist>
+  </div>`;
+}
+function wireExtraFees() {
+  if (window.__xfeesWired) return;
+  window.__xfeesWired = true;
+  document.addEventListener('input', (ev) => {
+    const el = ev.target && ev.target.closest && ev.target.closest('[data-xff]');
+    if (!el) return;
+    const t = resolveFieldTarget(el.getAttribute('data-xfpath'));
+    if (!t) return;
+    normalizeExtraFees(t);
+    const row = t.extra[Number(el.getAttribute('data-xfi'))];
+    if (!row) return;
+    row[el.getAttribute('data-xff')] = el.value;
+    saveState();
+  });
+  document.addEventListener('click', (ev) => {
+    const add = ev.target && ev.target.closest && ev.target.closest('[data-xfadd]');
+    const del = ev.target && ev.target.closest && ev.target.closest('[data-xfdel]');
+    if (!add && !del) return;
+    ev.preventDefault();
+    const path = add ? add.getAttribute('data-xfadd') : del.getAttribute('data-xfpath');
+    const t = resolveFieldTarget(path);
+    if (!t) return;
+    normalizeExtraFees(t);
+    if (add) {
+      if (t.extra.length >= FEE_EXTRA_MAX) return;
+      t.extra.push({ label: '', amount: '' });
+    } else {
+      t.extra.splice(Number(del.getAttribute('data-xfdel')), 1);
+    }
+    saveState();
+    const box = (add || del).closest('[data-xfees]');
+    if (!box) return;
+    box.outerHTML = extraFeesHtml(t, path);
+    if (add) {
+      const boxes = $$('[data-xfees]').filter(b => b.getAttribute('data-xfees') === path);
+      const inputs = boxes.length ? $$('input[data-xff="label"]', boxes[0]) : [];
+      if (inputs.length) inputs[inputs.length - 1].focus();
+    }
+  });
+}
+
 function wireTriDelegation(root) {
   root.addEventListener('click', (ev) => {
     const btn = ev.target.closest('.tri button[data-triv]');
@@ -1076,8 +1140,9 @@ function subjectBandHtml(s) {
           <div class="card-hint">Charged to ALL the subject's tenants — COMPS columns G / H.
             Leave blank when unknown; never guess.</div>
           ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsLabel), s.fees || {}, 'subject.fees')}
-          <div class="sub-label" title="Fees the tracker knows but the COMPS FEES dropdown has no row for (Pest, one-time and optional charges). Kept on the record and in the export JSON; not written to the COMPS tab.">Tracker-only (no COMPS row)</div>
-          <div class="subject-extra-fees">${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsLabel), s.fees || {}, 'subject.fees')}</div>
+          ${(wireExtraFees(), extraFeesHtml(s.fees || {}, 'subject.fees'))}
+          <div class="sub-label" title="Fees the tracker knows but the COMPS FEES Mandatory rows do not take (one-time and optional charges). Kept on the record and in the export JSON; not written to the COMPS tab.">Tracker-only (no COMPS row)</div>
+          <div class="subject-extra-fees">${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsLabel && FEE_HIDDEN_KEYS.indexOf(f.key) === -1), s.fees || {}, 'subject.fees')}</div>
         </div>
       </div>
       </div>
@@ -1304,6 +1369,7 @@ function renderCompEditor(compId) {
           <div class="card-hint">Required of ALL tenants — these feed the template's
             Eff. $/Mo formulas. Leave blank when unknown; never guess.</div>
           ${feeTableHtml((SCHEMA.fees || []).filter(f => f.compsLabel), c.fees, path + '.fees')}
+          ${(wireExtraFees(), extraFeesHtml(c.fees, path + '.fees'))}
         </div>
       </div>
       </div>
@@ -1323,7 +1389,7 @@ function renderCompEditor(compId) {
       <div class="card-body">
         ${fieldsHtml(SCHEMA.compExtraFields || [], c, path)}
         <div class="sub-label" title="One-time or optional charges. Not written to the COMPS tab, but they travel in the export JSON.">Tracker-only fees (one-time / optional)</div>
-        ${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsLabel), c.fees, path + '.fees')}
+        ${fieldsHtml((SCHEMA.fees || []).filter(f => !f.compsLabel && FEE_HIDDEN_KEYS.indexOf(f.key) === -1), c.fees, path + '.fees')}
       </div>
     </div>`;
 

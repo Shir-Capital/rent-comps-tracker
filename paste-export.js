@@ -79,7 +79,8 @@ let PX_BAND = null;
 function pxBounds() {
   if (PX_BAND) return PX_BAND;
   return { physFirst: TAB.physRowFirst, physLast: TAB.physRowLast,
-           amenFirst: TAB.amenRowFirst, amenLast: TAB.amenRowLast };
+           amenFirst: TAB.amenRowFirst, amenLast: TAB.amenRowLast,
+           feeFirst: TAB.feeRowFirst, feeLast: TAB.feeRowLast };
 }
 /** The row a band item lands on: the target's, by label, else the schema's. */
 function pxAttrRow(kind, item) {
@@ -130,7 +131,7 @@ function pxIsWritable(row, col) {
     const bb = pxBounds();
     if (row >= bb.physFirst && row <= bb.physLast && sIs('physicalValue')) return true;
     if (row >= bb.amenFirst && row <= bb.amenLast && sIs('amenityValue')) return true;
-    if (row >= TAB.feeRowFirst && row <= TAB.feeRowLast && (sIs('feeLabel') || sIs('feeValue'))) return true;
+    if (row >= bb.feeFirst && row <= bb.feeLast && (sIs('feeLabel') || sIs('feeValue'))) return true;
     return false;                                         // B array formula, C/D/F/H computed
   }
 
@@ -162,7 +163,7 @@ function pxIsWritable(row, col) {
   const bnd = pxBounds();
   const inPhys = row >= bnd.physFirst && row <= bnd.physLast && isOff('attr', 'physicalValue');
   const inAmen = row >= bnd.amenFirst && row <= bnd.amenLast && isOff('attr', 'amenityValue');
-  const inFee = row >= TAB.feeRowFirst && row <= TAB.feeRowLast &&
+  const inFee = row >= bnd.feeFirst && row <= bnd.feeLast &&
     (isOff('attr', 'feeLabel') || isOff('attr', 'feeValue'));
   if (inPhys || inAmen || inFee) return true;
   const inSection = BUCKETS.some(b => row >= b.startRow && row <= b.endRow);
@@ -232,8 +233,19 @@ function pxBuildMirror(tgt) {
      generic mode; labelCol/valueCol are absolute columns. Returns how many fees
      were captured and how many were placed. */
   const putFees = (feeBag, labels, labelCol, valueCol, who) => {
+    const FF = pxBounds().feeFirst, FL = pxBounds().feeLast;
+    /* The five fixed fees, then the named mandatory fees (fees.extra, open slots on v76) as {compsLabel, v}:
+       the same routing — the row already carrying that label, else the first blank-label Mandatory row — so a
+       re-paste reuses the slot that has the name, exactly as populate_comps-v54 does. */
+    const extra = extraFeesOf(feeBag)
+      .filter(x => String(x.label).trim() !== '' && numOrNull(x.amount) != null && numOrNull(x.amount) !== '' && Number(numOrNull(x.amount)) !== 0)   // $0 = 'no such fee': kept on the record, not given a slot
+      .map(x => ({ key: null, compsLabel: String(x.label).trim(), v: numOrNull(x.amount) }));
+    extraFeesOf(feeBag).filter(x => String(x.label).trim() === '' && numOrNull(x.amount) != null && numOrNull(x.amount) !== '')
+      .forEach(x => warn.push(who + ': a mandatory fee of $' + numOrNull(x.amount) + ' has no name — NOT written (name it on the comp)'));
     const fees = (SCHEMA.fees || []).filter(f => f.compsLabel &&
-      numOrNull(feeBag[f.key]) != null && numOrNull(feeBag[f.key]) !== '');
+      numOrNull(feeBag[f.key]) != null && numOrNull(feeBag[f.key]) !== '')
+      .map(f => ({ key: f.key, compsLabel: f.compsLabel, v: numOrNull(feeBag[f.key]) }))
+      .concat(extra);
     let placed = 0;
     if (fees.length) {
       /* Rows the destination already labels for this comp, so we write the
@@ -245,15 +257,15 @@ function pxBuildMirror(tgt) {
       const taken = {};
       const spare = [];
       if (labels) {
-        for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
+        for (let r = FF; r <= FL; r++) {
           if (!labels[r]) spare.push(r);
         }
       }
       fees.forEach(f => {
-        const v = numOrNull(feeBag[f.key]);
+        const v = f.v;
         let row = null;
         if (labels) {
-          for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
+          for (let r = FF; r <= FL; r++) {
             if (!taken[r] && labels[r] && pxNorm(labels[r]) === pxNorm(f.compsLabel)) { row = r; break; }
           }
           if (row) {
@@ -265,7 +277,7 @@ function pxBuildMirror(tgt) {
           row = spare.shift() || null;
           if (row == null) {
             warn.push(who + ': fee "' + f.compsLabel + '" ($' + v + ') NOT written — ' +
-              'no free labelled row (' + TAB.feeRowFirst + '-' + TAB.feeRowLast + ') left on that comp');
+              'no free Mandatory Fees row (' + FF + '-' + FL + ') left' + (FL - FF + 1 < 10 ? ' — this workbook is older than template v76, which has 5 open slots' : ''));
             return;
           }
         } else {
@@ -275,10 +287,10 @@ function pxBuildMirror(tgt) {
              used one it can duplicate a fee the analyst already typed further
              down, which is why the READ ME points at the aligned export and the
              CLEAR FIRST sheet lists the fee band. */
-          row = TAB.feeRowFirst + Object.keys(taken).length;
-          if (row > TAB.feeRowLast) {
+          row = FF + Object.keys(taken).length;
+          if (row > FL) {
             warn.push(who + ': fee "' + f.compsLabel + '" ($' + v + ') NOT written — ' +
-              'more fees than labelled rows');
+              'more fees than Mandatory rows (' + FF + '-' + FL + '); attach the deal workbook (aligned mode) to place named fees in its open slots');
             return;
           }
           taken[row] = true;
@@ -337,7 +349,7 @@ function pxBuildMirror(tgt) {
     if (!tgt && sf.captured) {
       clears.push({
         what: 'Subject — fee labels + $ (generic mode only)',
-        range: colLetter(sac.feeLabel) + TAB.feeRowFirst + ':' + colLetter(sac.feeValue) + TAB.feeRowLast,
+        range: colLetter(sac.feeLabel) + pxBounds().feeFirst + ':' + colLetter(sac.feeValue) + pxBounds().feeLast,
       });
     }
   }
@@ -460,8 +472,8 @@ function pxBuildMirror(tgt) {
     if (!tgt && fees.length) {
       clears.push({
         what: 'Comp ' + (slot + 1) + ' — fee labels + $ (generic mode only)',
-        range: colLetter(base + off.feeLabel) + TAB.feeRowFirst + ':' +
-          colLetter(base + off.feeValue) + TAB.feeRowLast,
+        range: colLetter(base + off.feeLabel) + pxBounds().feeFirst + ':' +
+          colLetter(base + off.feeValue) + pxBounds().feeLast,
       });
     }
   });
@@ -557,7 +569,7 @@ function pxReadTarget(buf, fileName) {
        span would also walk Physical/Amenities rows that never carry a fee
        label at this column and cost nothing extra, but the fee band is the
        only span with actual meaning here now that the three bands diverge. */
-    for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
+    for (let r = band.feeFirst; r <= band.feeLast; r++) {
       const lb = pxS(ws, r, base + off.feeLabel);
       if (lb) labels[r] = lb;
     }
@@ -577,7 +589,7 @@ function pxReadTarget(buf, fileName) {
   const subjectFeeLabels = {};
   const sacT = TAB.subjectAttrCols;
   if (sacT) {
-    for (let r = TAB.feeRowFirst; r <= TAB.feeRowLast; r++) {
+    for (let r = band.feeFirst; r <= band.feeLast; r++) {
       const lb = pxS(ws, r, sacT.feeLabel);
       if (lb) subjectFeeLabels[r] = lb;
     }
@@ -658,10 +670,24 @@ function pxReadBand(ws) {
   if (!ph.first || !am.first) {
     throw new Error('COMPS!B' + (hdr + 1) + ' / D' + (hdr + 1) + ' are blank — this workbook has no attribute band to align to.');
   }
+  /* The FEES Mandatory span, by its headers (2026-11-24): the rows from under 'Mandatory Fees' to above
+     'Optional Fees' in the subject's fee label column (G) — 5 rows up to template v75 / v71, 10 on v76 (5 fixed
+     + 5 open slots). Falls back to the schema's rows when the headers are missing. */
+  let feeFirst = 0, feeLast = 0;
+  const fc = (TAB.subjectAttrCols || {}).feeLabel || 7;
+  let mand = 0;
+  for (let r = hdr + 1; r <= hdr + 100; r++) {
+    const l = pxS(ws, r, fc).toLowerCase();
+    if (!mand && l === 'mandatory fees') mand = r;
+    else if (mand && l === 'optional fees') { if (r > mand + 1) { feeFirst = mand + 1; feeLast = r - 1; } break; }
+  }
+  if (!feeFirst) { feeFirst = TAB.feeRowFirst; feeLast = TAB.feeRowLast; }
   return {
     physical: ph.rows, amenities: am.rows,
     physFirst: ph.first, physLast: ph.last, amenFirst: am.first, amenLast: am.last,
-    layout: ph.keyAttributes ? 'key-attributes (v73+ / v69+)' : 'pre-v73',
+    feeFirst: feeFirst, feeLast: feeLast,
+    layout: (ph.keyAttributes ? 'key-attributes (v73+ / v69+)' : 'pre-v73')
+      + (feeLast - feeFirst + 1 >= 10 ? ', 10 Mandatory fee rows (v76+)' : ''),
   };
 }
 
@@ -794,8 +820,8 @@ async function pxBuildWorkbook(mirror) {
      record's family. */
   ws.getCell(bb.physFirst, 1).value = 'Physical ' + bb.physFirst + '-' + bb.physLast +
     ' / Amenities ' + bb.amenFirst + '-' + bb.amenLast +
-    ' / FEES (Mandatory) ' + TAB.feeRowFirst + '-' + TAB.feeRowLast;
-  const spineLast = Math.max(bb.physLast || 0, bb.amenLast || 0, TAB.feeRowLast || 0);
+    ' / FEES (Mandatory) ' + bb.feeFirst + '-' + bb.feeLast;
+  const spineLast = Math.max(bb.physLast || 0, bb.amenLast || 0, bb.feeLast || 0);
   for (let r = 1; r <= spineLast; r++) {
     const c = ws.getCell(r, 1);
     if (c.value != null && r !== 1) c.font = { name: BRAND.font || 'Arial Narrow', size: 9, italic: true, color: { argb: 'FF64748B' } };

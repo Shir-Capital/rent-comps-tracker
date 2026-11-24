@@ -316,10 +316,12 @@ function buildPopulatorPayload() {
         physical: PHYSICAL.reduce((a, it) => { a[it.key] = attrJson(it, subjectPhysicalValue(it, s)); return a; }, {}),
         amenities: AMENITIES.reduce((a, it) => { a[it.key] = attrJson(it, (s.amenities || {})[it.key]); return a; }, {}),
         /* Every fee, as a comp's travel: COMPS-bound and tracker-only alike. */
-        fees: (SCHEMA.fees || []).reduce((a, f) => {
+        fees: Object.assign((SCHEMA.fees || []).reduce((a, f) => {
           a[f.key] = f.type === 'number' ? numOrNull((s.fees || {})[f.key]) : ((s.fees || {})[f.key] || '');
           return a;
-        }, {}),
+        }, {}), { extra: extraFeesJson(s.fees) }),
+        /* Named mandatory fees, in the populate_comps-v54 payload shape. */
+        mandatory_fees: mandatoryFeesJson(s.fees),
       },
       unit_mix: (STATE.subjectUnitMix || []).filter(rowHasData).map(r => ({
         type: (function () { const k = bucketFor(r.beds, r.baths); return k ? bucketTypeLabel(k) : ''; })(),
@@ -413,12 +415,28 @@ function buildPopulatorPayload() {
          count all left here as null once the band grew past Y/N. */
       physical: PHYSICAL.reduce((a, p) => { a[p.key] = attrJson(p, c.physical[p.key]); return a; }, {}),
       amenities: AMENITIES.reduce((a, m) => { a[m.key] = attrJson(m, c.amenities[m.key]); return a; }, {}),
-      fees: (SCHEMA.fees || []).reduce((a, f) => {
+      fees: Object.assign((SCHEMA.fees || []).reduce((a, f) => {
         a[f.key] = f.type === 'number' ? numOrNull(c.fees[f.key]) : (c.fees[f.key] || '');
         return a;
-      }, {}),
+      }, {}), { extra: extraFeesJson(c.fees) }),
+      /* populate_comps-v54 (Rent Comps Unified SKILL §C24) writes each of these to the Mandatory slot already
+         carrying its name, else the first blank one, labelled with the name. The five fixed fees still travel
+         in `fees` above (FEE_LABEL_TO_KEY), so they are not repeated here. */
+      mandatory_fees: mandatoryFeesJson(c.fees),
     })),
   };
+}
+
+/** fees.extra as JSON: [{label, amount}] with the amount as a number (or null). */
+function extraFeesJson(fees) {
+  return extraFeesOf(fees).map(x => ({ label: String(x.label || '').trim(), amount: numOrNull(x.amount) }));
+}
+/** fees.extra in populate_comps-v54's `mandatory_fees` shape. Only named fees with an amount. */
+function mandatoryFeesJson(fees) {
+  return extraFeesOf(fees)
+    .filter(x => String(x.label || '').trim() !== '' && numOrNull(x.amount) != null && numOrNull(x.amount) !== '' && Number(numOrNull(x.amount)) !== 0)
+    .map(x => ({ name: String(x.label).trim(), amount: numOrNull(x.amount), per: 'month', status: 'mandatory',
+      source: 'Rent Comps Tracker', url: '', looked_up_at: null, quote: '' }));
 }
 
 function exportFileBase() {
@@ -789,6 +807,15 @@ async function buildCompsWorkbook() {
           colLetter(base + off.feeValue) + '·"' + f.compsLabel + '"',
           'by label', colLetter(base + off.feeValue),
           who, 'Fee — ' + f.compsLabel + ' (row resolved by label)', v,
+        ]);
+        r.eachCell(cell => { cell.font = font; });
+      });
+      /* Named mandatory fees: the row carrying the name, else the first blank Mandatory slot (v76 open slots). */
+      mandatoryFeesJson(c.fees).forEach(m => {
+        const r = ws.addRow([
+          colLetter(base + off.feeValue) + '·"' + m.name + '"',
+          'by label / open slot', colLetter(base + off.feeValue),
+          who, 'Mandatory fee — ' + m.name + ' (its own row, else the first blank Mandatory slot, labelled)', m.amount,
         ]);
         r.eachCell(cell => { cell.font = font; });
       });

@@ -382,3 +382,6 @@ table.sc-arow tr:hover td { background: #fafbfd; }
   .sc-ifilt input[type="number"] { width: 64px; }
   .sc-uchk input { width: 22px; height: 22px; }
 }
+
+/* Named mandatory fees in the fee strip (2026-11-24): same cell, a faint tint so they read as the open slots. */
+.sc-fcell.sc-fx { background: #f6f8fc; }

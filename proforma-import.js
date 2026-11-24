@@ -874,10 +874,25 @@ function pfReadComps(ws) {
      normal. Widened from the old 14-row window to the Mandatory band the schema
      declares, and it no longer stops at the first blank, which used to cut the
      read off at the two empty slots every template ships with. */
+  /* The Mandatory span is found BY ITS HEADERS (2026-11-24): every row from under 'Mandatory Fees' to above
+     'Optional Fees' in the subject's fee label column — 5 rows on templates up to v75 / v71, 10 on v76 (5 fixed +
+     5 open slots), the same rule populate_comps-v54 uses. Only when the headers are not there (a pre-v41
+     workbook) does it fall back to the schema's rows. */
   const feeBlock = () => {
     const out = [];
-    const first = (TAB.feeRowFirst || 0) + bandDelta;
-    const last = (TAB.feeSumLastRow || TAB.feeRowLast || 0) + bandDelta;
+    let first = 0, last = 0;
+    if (attrHdr) {
+      let mand = 0;
+      for (let r = attrHdr + 1; r <= attrHdr + 100; r++) {
+        const l = pfS(pfV(ws, r, S + 5)).trim().toLowerCase();
+        if (!mand && l === 'mandatory fees') mand = r;
+        else if (mand && l === 'optional fees') { if (r > mand + 1) { first = mand + 1; last = r - 1; } break; }
+      }
+    }
+    if (!first) {
+      first = (TAB.feeRowFirst || 0) + bandDelta;
+      last = (TAB.feeSumLastRow || TAB.feeRowLast || 0) + bandDelta;
+    }
     for (let r = first; r <= last && first; r++) out.push([r, pfS(pfV(ws, r, S + 5))]);
     return out;
   };
@@ -1098,8 +1113,9 @@ function pfMatchFee(label) {
 /* Convert one block's raw band read ({attrs, amens, fees} as pfReadComps
    returns them) into a record's physical / amenities / fees bags. Shared by
    every comp AND the subject (2026-11-17), so the two are typed and fee-matched
-   identically: by KEY and TYPE for attributes, by LABEL for fees, unmatched fees
-   kept in fees.unmatched rather than dropped. `notes` collects what could not be
+   identically: by KEY and TYPE for attributes, by LABEL for fees; a Mandatory fee
+   whose label is not one of the five fixed ones goes to fees.extra under its own
+   name (open slots, template v76) rather than being dropped. `notes` collects what could not be
    placed. This is the body that used to sit inline in pfToImport's comp loop. */
 function pfApplyBand(target, raw, notes) {
   const byKey = (items) => items.reduce((a, it) => { a[it.key] = it; return a; }, {});
@@ -1141,6 +1157,13 @@ function pfApplyBand(target, raw, notes) {
      the label and then assigning by INDEX (which is what this did until
      2026-08-08) files a valet-trash charge as insurance, and the fee column is
      summed into every unit's Eff. $/Mo. */
+  /* Every row read here is inside the Mandatory span, so every one is a mandatory monthly fee summed into Eff.
+     $/Mo. The five fixed labels (compsLabel) fill their keys; ANY other label — an open slot on v76 (Pest
+     Control, Property Liability Fee), or a free-typed label on an older file (Alma: Pest, Utility Bill Fee, Res.
+     Utility, Community Fee) — is kept under its own name in fees.extra, in row order. (Until 2026-11-24 those went
+     to fees.unmatched plus a single other/other_label, and "Pest" to the tracker-only pest key that never reached
+     the COMPS tab; normalizeExtraFees() moves records stored that way.) */
+  target.fees.extra = [];
   (raw.fees || []).forEach(([lbl, val]) => {
     const label = pfS(lbl);
     const hasVal = pfN(val) !== null || pfS(val);
@@ -1151,26 +1174,10 @@ function pfApplyBand(target, raw, notes) {
       return;
     }
     const f = pfMatchFee(label);
-    if (f && pfN(val) !== null) target.fees[f.key] = pfNumStr(val);
-    else if (f) notes.push('Fee ' + label + ': ' + pfS(val));
-    else {
-      /* A real charge the tracker has no field for. Every one is kept now, not
-         just the first: `other` is a single slot, and a real ModPack comp
-         carries up to five free-typed labels (Alma: Trash, Pest, Utility Bill
-         Fee, Res. Utility, Community Fee), so the old `!target.fees.other` guard
-         silently dropped four of them. The first still fills other/other_label
-         for compatibility; the full list rides along so nothing is lost and the
-         import summary can show what needs a home. */
-      notes.push('Fee ' + label + ': ' + (pfN(val) !== null ? pfNumStr(val) : pfS(val)) + ' (no tracker field for this label)');
-      if (pfN(val) !== null) {
-        target.fees.unmatched = target.fees.unmatched || [];
-        target.fees.unmatched.push({ label, amount: pfNumStr(val) });
-        if (!target.fees.other) {
-          target.fees.other = pfNumStr(val);
-          target.fees.other_label = label;
-        }
-      }
-    }
+    if (f && f.compsLabel && pfN(val) !== null) target.fees[f.key] = pfNumStr(val);
+    else if (f && f.compsLabel) notes.push('Fee ' + label + ': ' + pfS(val));
+    else if (pfN(val) !== null) target.fees.extra.push({ label, amount: pfNumStr(val) });
+    else notes.push('Fee ' + label + ': ' + pfS(val) + ' (not a number — not imported)');
   });
 }
 
@@ -1339,7 +1346,8 @@ function pfToImport(det) {
   pfApplyBand(subjectBand, det.subject, subjectBandNotes);
   const bandCount = (bag, items) => items.filter(it => String(bag[it.key] == null ? '' : bag[it.key]).trim() !== '').length;
   const subjectBandFilled = bandCount(subjectBand.physical, PHYSICAL) + bandCount(subjectBand.amenities, AMENITIES)
-    + (SCHEMA.fees || []).filter(f => String(subjectBand.fees[f.key] == null ? '' : subjectBand.fees[f.key]).trim() !== '').length;
+    + (SCHEMA.fees || []).filter(f => String(subjectBand.fees[f.key] == null ? '' : subjectBand.fees[f.key]).trim() !== '').length
+    + extraFeesOf(subjectBand.fees).length;
   if (subjectBandNotes.length) {
     warn.push('Subject attributes: ' + subjectBandNotes.join(' | '));
   }
@@ -1427,10 +1435,15 @@ function pfToImport(det) {
       + 'imported as-is rather than dropped: ' + shown
       + (offList.length > 6 ? '; and ' + (offList.length - 6) + ' more' : ''));
   }
-  const unmatchedFees = comps.reduce((n, c) => n + (((c.fees || {}).unmatched || []).length), 0);
-  if (unmatchedFees) {
-    warn.push(unmatchedFees + ' fee row(s) carry a label the tracker has no field for '
-      + '(e.g. Facility, Utility Bill Fee). Every one was kept on the comp; none were dropped.');
+  const extraFees = comps.reduce((n, c) => n + extraFeesOf(c.fees).length, 0);
+  const overMax = comps.filter(c => extraFeesOf(c.fees).length > FEE_EXTRA_MAX).map(c => c.name || '(unnamed)');
+  if (extraFees) {
+    warn.push(extraFees + ' mandatory fee(s) carry their own label (e.g. Pest Control, Utility Bill Fee) and were '
+      + 'imported by name into each comp\'s "Other mandatory fees" — the open Mandatory Fees slots.');
+  }
+  if (overMax.length) {
+    warn.push(overMax.join(', ') + ': more than ' + FEE_EXTRA_MAX + ' named mandatory fees — all were kept, but the '
+      + 'template has only ' + FEE_EXTRA_MAX + ' open slots, so a paste can place only ' + FEE_EXTRA_MAX + '.');
   }
   if (det.stride !== 9) {
     warn.push('This workbook\'s comp blocks stride ' + det.stride
@@ -1776,14 +1789,19 @@ function pfApply() {
     ['physical', 'amenities', 'fees'].forEach(bag => {
       const src = p.subjectBand[bag] || {};
       Object.keys(src).forEach(k => {
-        if (k === 'unmatched') return;
+        if (k === 'unmatched' || k === 'extra') return;
         const v = src[k];
         if (v == null || String(v).trim() === '') return;
         STATE.subject[bag][k] = v;
         n++;
       });
     });
-    if (Array.isArray(p.subjectBand.fees.unmatched)) STATE.subject.fees.unmatched = p.subjectBand.fees.unmatched.slice();
+    /* Named mandatory fees are the workbook's list: replaced as a set when the workbook carries any, kept when
+       it carries none (an older proforma never erases what was typed on site). */
+    if (extraFeesOf(p.subjectBand.fees).length) {
+      STATE.subject.fees.extra = extraFeesOf(p.subjectBand.fees).map(x => ({ label: x.label, amount: x.amount }));
+      n += STATE.subject.fees.extra.length;
+    }
     /* A retired Amenities answer (pre-v73 workbook) that disagreed with its
        Physical twin: kept beside the record so the Market Rents tab flags it. */
     if (p.subjectBand.retired_conflicts) {

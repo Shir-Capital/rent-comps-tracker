@@ -334,6 +334,50 @@ function blankFees() {
   return o;
 }
 
+/* OPEN MANDATORY FEE SLOTS (template v76, 2026-11-24). COMPS FEES' Mandatory span grew from 5 rows to 10: rows
+   202-206 (ExStay 116-120) keep the fixed Amenity / Cable/Internet / Cleaning / Trash / V Trash, and rows 207-211
+   (ExStay 121-125) are OPEN — blank label, any fee name — and every unit row's Eff. $/Mo sums all 10. The rows are
+   found by label (the "Mandatory Fees" header to the "Optional Fees" header), never by number, and older
+   templates keep 5. populate_comps-v54 (Rent Comps Unified SKILL §C24) puts any other mandatory monthly fee (Pest
+   Control, Property Liability Fee, …) in the first blank Mandatory slot, labelled with its own name.
+   The tracker keeps those fees as `fees.extra` = [{label, amount}] on every comp and the subject, beside the five
+   fixed keys (amenity, cable_internet, cleaning, trash, valet_trash), up to FEE_EXTRA_MAX. normalizeExtraFees()
+   runs on every load and MOVES into it what earlier versions kept elsewhere for the same kind of charge:
+   `fees.unmatched` (labels an import found in the Mandatory band with no fixed key), the single `other` /
+   `other_label` pair, and the tracker-only `pest` (owner 2026-11-24: "trash and pest fees should be considered
+   mandatory"). Those three are blanked after the move; nothing is dropped. */
+const FEE_EXTRA_MAX = 5;
+function normalizeExtraFees(fees) {
+  if (!fees || typeof fees !== 'object') return fees;
+  const str = v => String(v == null ? '' : v).trim();
+  if (!Array.isArray(fees.extra)) {
+    const out = [];
+    const add = (label, amount) => {
+      const l = str(label), a = str(amount);
+      if (!l && !a) return;
+      if (l && out.some(x => x.label.toLowerCase() === l.toLowerCase())) return;
+      out.push({ label: l, amount: a });
+    };
+    (Array.isArray(fees.unmatched) ? fees.unmatched : []).forEach(x => add(x && x.label, x && x.amount));
+    if (str(fees.other) !== '') add(str(fees.other_label) || 'Other', fees.other);
+    if (str(fees.pest) !== '') add('Pest', fees.pest);
+    fees.extra = out;
+    if ('other' in fees) fees.other = '';
+    if ('other_label' in fees) fees.other_label = '';
+    if ('pest' in fees) fees.pest = '';
+  } else {
+    fees.extra = fees.extra.filter(x => x && typeof x === 'object')
+      .map(x => ({ label: x.label == null ? '' : String(x.label), amount: x.amount == null ? '' : String(x.amount) }));
+  }
+  delete fees.unmatched;
+  return fees;
+}
+/** The named mandatory fees that carry something (a label or an amount), in order. */
+function extraFeesOf(fees) {
+  return (fees && Array.isArray(fees.extra) ? fees.extra : [])
+    .filter(x => x && (String(x.label == null ? '' : x.label).trim() !== '' || String(x.amount == null ? '' : x.amount).trim() !== ''));
+}
+
 function newProperty(name) {
   const id = uid();
   const p = {
@@ -438,7 +482,7 @@ function hydrateSubjectBand(s) {
   s.physical = Object.assign(blankPhysical(), s.physical || {});
   s.amenities = Object.assign(blankAmenities(), s.amenities || {});
   foldRetiredAttrs(s);
-  s.fees = Object.assign(blankFees(), s.fees || {});
+  s.fees = normalizeExtraFees(Object.assign(blankFees(), s.fees || {}));
   return s;
 }
 
@@ -518,7 +562,7 @@ function hydrateComp(c) {
   c.physical = Object.assign(blankPhysical(), c.physical || {});
   c.amenities = Object.assign(blankAmenities(), c.amenities || {});
   foldRetiredAttrs(c);
-  c.fees = Object.assign(blankFees(), c.fees || {});
+  c.fees = normalizeExtraFees(Object.assign(blankFees(), c.fees || {}));
   if (!c.category) c.category = '';
 
   /* v7 migration. Records captured against the v3 geometry stored a

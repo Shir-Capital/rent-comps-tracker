@@ -233,6 +233,13 @@ main { padding: 10px 10px 96px; max-width: 900px; margin: 0 auto; }
 .umix-head { display: none; }
 .urow-sec { display: none; }
 .fee-cell input { text-align: right; }
+/* Named mandatory fees (open Mandatory Fees slots, 2026-11-24): name | $/Mo | ✕ per row. */
+.xfees { margin-top: 8px; }
+.xfee-row { display: grid; grid-template-columns: minmax(0, 1fr) 92px 30px; gap: 5px; margin-top: 4px; align-items: center; }
+.xfee-row input[type="number"] { text-align: right; }
+.xfee-del { border: 1px solid var(--line); background: #fff; border-radius: 6px; height: 30px; cursor: pointer; color: var(--muted); }
+.xfee-del:hover { color: var(--err); border-color: var(--err); }
+.xfees > .btn { margin-top: 6px; }
 
 input[type="text"], input[type="number"], input[type="tel"], input[type="url"],
 input[type="date"], select, textarea {
