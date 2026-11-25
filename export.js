@@ -944,7 +944,9 @@ function renderPhase4() {
         <div class="kv"><span class="k">Target</span><span class="v">${esc(TAB.templateVersion)} · rows ${esc(TAB.rowHeader)}–${esc(TAB.amenRowLast)}</span></div>
         ${(function () { const x = typeof exportVersionInfo === 'function' ? exportVersionInfo() : null;
           return x ? '<div class="kv"><span class="k">Version exported</span><span class="v">' + esc(x.label)
-            + (x.versions_of_subject > 1 ? ' <span class="muted">(1 of ' + x.versions_of_subject + ')</span>' : '') + '</span></div>' : ''; })()}
+            + (x.versions_of_subject > 1 ? ' <span class="muted">(1 of ' + x.versions_of_subject + ')</span>' : '') + '</span></div>'
+            + '<div class="kv"><span class="k">Version created / modified</span><span class="v">' + esc(versionWhen(x.created_at))
+            + ' / ' + esc(versionWhen(x.last_edited)) + '</span></div>' : ''; })()}
         ${TAB.templateSlots > MAX_COMPS ? `<div class="tiny muted" style="margin-top:6px">
           The COMPS tab has ${esc(TAB.templateSlots)} comp slots, but the last
           ${esc(TAB.templateSlots - MAX_COMPS)} (cols ${esc((TAB.templateSlotBaseCols || []).slice(MAX_COMPS).map(colLetter).join(', '))})

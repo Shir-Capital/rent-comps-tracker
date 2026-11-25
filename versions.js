@@ -37,6 +37,10 @@
 
 const VERSION_FIELDS = ['comps', 'marketRents', 'internalComp'];
 const VERSIONS_FOLDER = 'Versions';
+/* The name a subject's first version gets (legacy split, a new subject, an
+   index stub without a label). Was "Original" until 2026-11-25; the owner
+   renamed every existing version to "v1" the same day. */
+const FIRST_VERSION_LABEL = 'v1';
 let CURRENT_VERSION = null;
 
 function versionStore() {
@@ -54,7 +58,7 @@ function meEmail() { return (typeof CURRENT_USER === 'object' && CURRENT_USER &&
 function blankVersion(propertyId, label) {
   const now = nowISO();
   return {
-    versionId: newVersionId(), propertyId, label: label || 'Original', archived: false,
+    versionId: newVersionId(), propertyId, label: label || FIRST_VERSION_LABEL, archived: false,
     versionCreatedAt: now, versionCreatedBy: meEmail(), versionUpdated: now, versionLastEditor: meEmail(),
     versionDrive: { fileId: '', fileName: '', lastPushed: null, lastPulled: null, remoteModifiedTime: null },
     comps: [], marketRents: {}, internalComp: Object.assign({}, INTERNAL_DEFAULTS),
@@ -156,6 +160,8 @@ function sharedPayload(p) {
 function versionPayload(v) {
   const out = JSON.parse(JSON.stringify(v));
   delete out.versionDrive; delete out.provisional;
+  if (!out.versionUpdated) out.versionUpdated = nowISO();
+  if (!out.versionCreatedAt) out.versionCreatedAt = out.versionUpdated;
   out._app = 'rent-comps-tracker-version';
   return out;
 }
@@ -175,7 +181,7 @@ function versionLastEdited(local, row) {
 function versionLabelOf(local, row) {
   const lt = (local && (local.versionUpdated || local.versionCreatedAt)) || '';
   const rt = (row && (row.lastModified || row.createdAt)) || '';
-  const pick = (!local || (row && rt > lt)) ? row : local;
+  const pick = (!local || (row && rt >= lt)) ? row : local;   // a tie: the shared index wins
   return (pick && pick.label) || (local || {}).label || (row || {}).label || 'Untitled';
 }
 function manifestVersionRows(propertyId) {
@@ -192,7 +198,18 @@ function mergedVersionsFor(propertyId) {
     label: versionLabelOf(e.local, e.row),
     archived: !!((e.local && e.local.archived) || (e.row && e.row.archived)),
     edited: versionLastEdited(e.local, e.row),
+    created: (e.local && e.local.versionCreatedAt) || (e.row && e.row.createdAt) || '',
   })).sort((x, y) => y.edited.localeCompare(x.edited) || x.label.localeCompare(y.label));
+}
+/** "Nov 24, 2026, 3:05 PM" in the viewer's time zone; "unknown" when missing. */
+function versionWhen(iso) {
+  if (!iso) return 'unknown';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return 'unknown';
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function versionTimesLine(e) {
+  return 'created ' + versionWhen(e.created) + ' · last modified ' + versionWhen(e.edited);
 }
 function versionCountFor(propertyId) {
   return mergedVersionsFor(propertyId).filter(e => !e.archived).length;
@@ -239,7 +256,7 @@ function attachVersionForOpen(p) {
   versionStore();
   const mine = versionsOf(p.id);
   if (!mine.length && isLegacyRecord(p)) {   // local copy from before versions: split it
-    const v = hydrateVersion(blankVersion(p.id, 'Original'));
+    const v = hydrateVersion(blankVersion(p.id, FIRST_VERSION_LABEL));
     v.versionId = legacyVersionId(p.id);
     v.versionCreatedBy = p.lastEditor || meEmail();
     v.versionCreatedAt = p.created || v.versionCreatedAt;
@@ -262,9 +279,9 @@ function attachVersionForOpen(p) {
   if (!v) {
     const row = manifestVersionRows(p.id).filter(r => r.fileId && !r.archived)
       .sort((a, b) => String(b.lastModified || '').localeCompare(String(a.lastModified || '')))[0];
-    v = hydrateVersion(blankVersion(p.id, row ? row.label : 'Original'));
+    v = hydrateVersion(blankVersion(p.id, row ? row.label : FIRST_VERSION_LABEL));
     if (row) {
-      v.versionId = row.id; v.label = row.label || 'Original';
+      v.versionId = row.id; v.label = row.label || FIRST_VERSION_LABEL;
       v.versionCreatedAt = row.createdAt || v.versionCreatedAt; v.versionCreatedBy = row.createdBy || '';
       v.versionDrive.fileId = row.fileId; v.versionDrive.fileName = row.fileName || '';
       v.versionUpdated = '';                     // older than anything Drive has -> reconcile pulls
@@ -659,8 +676,8 @@ async function migrateLegacyVersion(p, v) {
     }
     const oldId = v.versionId;
     v.versionId = newVersionId();
-    let label = 'Original (unsynced copy)', n = 2;
-    while (versionLabelTaken(p.id, label, v.versionId)) label = 'Original (unsynced copy ' + (n++) + ')';
+    let label = FIRST_VERSION_LABEL + ' (unsynced copy)', n = 2;
+    while (versionLabelTaken(p.id, label, v.versionId)) label = FIRST_VERSION_LABEL + ' (unsynced copy ' + (n++) + ')';
     v.label = label;
     delete versionStore()[oldId];
     delete v._legacySplit;
@@ -727,8 +744,8 @@ function versionManifestRow(v, asEditor) {
   const row = {
     id: v.versionId, propertyId: v.propertyId, label: v.label, archived: !!v.archived,
     fileId: v.versionDrive.fileId || '', fileName: v.versionDrive.fileName || '',
-    createdAt: v.versionCreatedAt, createdBy: v.versionCreatedBy,
-    lastModified: v.versionUpdated, lastEditor: v.versionLastEditor || me,
+    createdAt: v.versionCreatedAt || v.versionUpdated || nowISO(), createdBy: v.versionCreatedBy,
+    lastModified: v.versionUpdated || nowISO(), lastEditor: v.versionLastEditor || me,
     compCount: (v.comps || []).length,
   };
   if (asEditor) { row.currentEditor = me; row.currentEditorHeartbeatAt = nowISO(); }
@@ -743,7 +760,7 @@ function upsertVersionRowInto(data, v, asEditor) {
   if (i >= 0) {
     const cur = data.versions[i];
     const merged = Object.assign({}, cur, row);
-    if ((cur.lastModified || '') > (row.lastModified || '')) merged.label = cur.label;   // last edited wins on the name
+    if ((cur.lastModified || '') >= (row.lastModified || '')) merged.label = cur.label;   // last edited wins on the name; a tie keeps the index's
     data.versions[i] = merged;
   } else data.versions.push(row);
 }
@@ -946,7 +963,7 @@ function promptNewVersion() {
 function versionMenu(versionId) {
   const e = mergedVersionsFor(STATE.id).find(x => x.id === versionId);
   if (!e) return;
-  const choice = prompt('"' + e.label + '"\n\n1. Rename\n2. Copy (same comps and market rents, new name)\n3. '
+  const choice = prompt('"' + e.label + '"\n' + versionTimesLine(e) + '\n\n1. Rename\n2. Copy (same comps and market rents, new name)\n3. '
     + (e.archived ? 'Unarchive' : 'Archive') + '\n4. Delete (for everyone; the file goes to Drive trash)\n\nEnter 1-4:');
   if (choice === '1') {
     if (!e.local) { toast('Open that version first, then rename it'); return; }
@@ -968,7 +985,8 @@ function manageVersionsMenu() {
   const list = mergedVersionsFor(STATE.id);
   if (!list.length) return;
   const pick = prompt('Versions of this subject (most recently edited first):\n\n'
-    + list.map((e, i) => (i + 1) + '. ' + e.label + (e.archived ? ' (archived)' : '') + (CURRENT_VERSION && e.id === CURRENT_VERSION.versionId ? '  ← open' : '')).join('\n')
+    + list.map((e, i) => (i + 1) + '. ' + e.label + (e.archived ? ' (archived)' : '') + (CURRENT_VERSION && e.id === CURRENT_VERSION.versionId ? '  ← open' : '')
+      + '\n     ' + versionTimesLine(e)).join('\n')
     + '\n\nEnter 1-' + list.length + ':', '1');
   const i = parseInt(pick, 10);
   if (i >= 1 && i <= list.length) versionMenu(list[i - 1].id);
@@ -988,7 +1006,7 @@ function renderVersionStrip() {
     const who = e.row && e.row.currentEditor && e.row.currentEditor !== meEmail() && e.row.currentEditorHeartbeatAt
       && (Date.now() - new Date(e.row.currentEditorHeartbeatAt).getTime()) < HEARTBEAT_STALE_MS ? e.row.currentEditor : '';
     const tip = (active ? 'Open now: click to rename, copy, archive or delete' : 'Switch to “' + e.label + '”')
-      + (e.edited ? ' · edited ' + relTime(e.edited) : '') + (who ? ' · ' + who + ' is in it' : '');
+      + ' · ' + versionTimesLine(e) + (who ? ' · ' + who + ' is in it' : '');
     return `<button type="button" class="vpill${active ? ' on' : ''}" data-vid="${esc(e.id)}" title="${esc(tip)}">${esc(e.label)}${who ? ' <span class="vdot" aria-hidden="true">●</span>' : ''}</button>`;
   }).join('');
   const hasMore = list.length > 1 || list.some(e => e.archived);
@@ -1017,8 +1035,8 @@ function exportVersionInfo() {
   const v = CURRENT_VERSION;
   if (!v || !STATE || v.propertyId !== STATE.id) return null;
   return {
-    id: v.versionId, label: v.label || 'Original',
-    last_edited: v.versionUpdated || '', last_editor: v.versionLastEditor || '',
+    id: v.versionId, label: v.label || FIRST_VERSION_LABEL,
+    created_at: v.versionCreatedAt || '', last_edited: v.versionUpdated || '', last_editor: v.versionLastEditor || '',
     created_by: v.versionCreatedBy || '', file_name: v.versionDrive.fileName || '',
     versions_of_subject: Math.max(1, versionCountFor(STATE.id)),
   };
