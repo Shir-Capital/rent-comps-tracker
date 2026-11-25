@@ -110,7 +110,11 @@
      ◀ ▶ cycle as the real comps, LAST, so the tab still opens on the top comp;
      the "Internal" button in the cycle header jumps straight to it. */
   const INTERNAL = { __internal: true, compId: '__internal', name: 'Internal' };
-  function cycleFor(key) { return compsWithBucket(key).concat([INTERNAL]); }
+  /* ExStay never has an internal comp (owner, 2026-11-25): its template has no
+     rent-roll lease table, so the comp cycle, its dot and the Internal button
+     leave it out for ExStay subjects. */
+  function internalAllowed() { return familyOf(STATE) !== 'ExStay'; }
+  function cycleFor(key) { return internalAllowed() ? compsWithBucket(key).concat([INTERNAL]) : compsWithBucket(key); }
   function isInternal(c) { return !!(c && c.__internal); }
   /** The subject plan carrying the most units — the default anchor. */
   function anchorRowFor(key) {
@@ -445,14 +449,14 @@
         ${present ? '' : 'disabled'} data-sccomp="${esc(x.compId)}"
         title="${esc(x.name || 'comp')}${present ? '' : ' — no ' + esc(bucketShortOf(key))}"
         aria-label="${esc(x.name || 'comp')}"></button>`;
-    }).join('') + `<button class="sc-dot int${isInternal(c) ? ' on' : ''}" data-sccomp="${INTERNAL.compId}"
-        title="Internal: the subject's own recent leases" aria-label="Internal comp"></button>`;
+    }).join('') + (internalAllowed() ? `<button class="sc-dot int${isInternal(c) ? ' on' : ''}" data-sccomp="${INTERNAL.compId}"
+        title="Internal: the subject's own recent leases" aria-label="Internal comp"></button>` : '');
     return `<div class="sc-cyc">
         <button id="sc-prev" title="Previous comp with this unit type" aria-label="Previous comp">◀</button>
         <span class="pos">${SC.compIdx + 1} / ${list.length}</span>
         <button id="sc-next" title="Next comp with this unit type" aria-label="Next comp">▶</button>
         <div class="sc-dots">${dots}</div>
-        <button id="sc-int" class="sc-intbtn${isInternal(c) ? ' on' : ''}" title="The subject's own recent leases, from the rent roll">Internal</button>
+        ${internalAllowed() ? `<button id="sc-int" class="sc-intbtn${isInternal(c) ? ' on' : ''}" title="The subject's own recent leases, from the rent roll">Internal</button>` : ''}
       </div>`;
   }
 
@@ -572,6 +576,7 @@
 
     if (SC.compIdx >= list.length) SC.compIdx = 0;
     const c = list[SC.compIdx];
+    if (!c) return '<div class="sc-empty"><span>No comp has this unit type yet.</span></div>';   // ExStay: no internal comp to fall back on
     if (isInternal(c)) return internalPaneHtml(list);
     const meta = categoryMeta(c.category);
     const vac = num(c.vacancy_pct);
@@ -833,7 +838,7 @@
     const list = cycleFor(SC.bucket);
     const sel = list[Math.min(SC.compIdx, list.length - 1)];
     /* The internal comp IS the subject: no photos or attributes of its own. */
-    const comp = isInternal(sel) ? null : sel;
+    const comp = (!sel || isInternal(sel)) ? null : sel;
     const sameAsSubject = isInternal(sel)
       ? '<div class="sc-empty"><span>Internal comp — same property as the subject (left).</span></div>' : '';
     const other = showOther();
