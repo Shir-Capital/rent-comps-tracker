@@ -41,6 +41,28 @@ const VERSIONS_FOLDER = 'Versions';
    index stub without a label). Was "Original" until 2026-11-25; the owner
    renamed every existing version to "v1" the same day. */
 const FIRST_VERSION_LABEL = 'v1';
+/* Version numbers carry who created them (owner, 2026-11-25): "v1 (egordon)",
+   "v2 (greyes)". The username is the part of the creator's email before "@". */
+function versionUserTag(email) { return String(email || '').trim().replace(/@.*$/, ''); }
+function withVersionUser(label, email) {
+  const t = versionUserTag(email);
+  return t ? label + ' (' + t + ')' : label;
+}
+/** The first version of a subject, named for whoever created it. */
+function firstVersionLabel(email) { return withVersionUser(FIRST_VERSION_LABEL, email); }
+/** A bare number ("v3") typed by hand gets the creator's username; any other name is kept as typed. */
+function versionLabelWithUser(label, email) {
+  const l = String(label || '').trim();
+  return /^v\d+$/i.test(l) ? withVersionUser(l.toLowerCase(), email) : l;
+}
+/** The next free number on this subject, for the current user: "v3 (egordon)". */
+function nextVersionLabel(propertyId) {
+  let max = 0;
+  mergedVersionsFor(propertyId).forEach(e => { const m = /^v(\d+)\b/i.exec(String(e.label || '')); if (m) max = Math.max(max, +m[1]); });
+  let n = max + 1, label = withVersionUser('v' + n, meEmail());
+  while (versionLabelTaken(propertyId, label)) label = withVersionUser('v' + (++n), meEmail());
+  return label;
+}
 let CURRENT_VERSION = null;
 
 function versionStore() {
@@ -218,12 +240,12 @@ function versionLabelTaken(propertyId, label, exceptId) {
   const want = String(label || '').trim().toLowerCase();
   return !!want && mergedVersionsFor(propertyId).some(e => e.id !== exceptId && String(e.label).trim().toLowerCase() === want);
 }
-function promptUniqueVersionName(propertyId, message, initial, exceptId) {
+function promptUniqueVersionName(propertyId, message, initial, exceptId, creatorEmail) {
   let value = initial || '';
   for (;;) {
     const a = prompt(message, value);
     if (a === null) return null;
-    value = String(a).trim();
+    value = versionLabelWithUser(String(a).trim(), creatorEmail || meEmail());
     if (!value) { message = 'Enter a name for this version:'; continue; }
     if (versionLabelTaken(propertyId, value, exceptId)) {
       message = '"' + value + '" is already the name of another version of this subject.\n\nPick a different name:';
@@ -259,6 +281,7 @@ function attachVersionForOpen(p) {
     const v = hydrateVersion(blankVersion(p.id, FIRST_VERSION_LABEL));
     v.versionId = legacyVersionId(p.id);
     v.versionCreatedBy = p.lastEditor || meEmail();
+    v.label = firstVersionLabel(v.versionCreatedBy);
     v.versionCreatedAt = p.created || v.versionCreatedAt;
     v.versionUpdated = p.updated || v.versionUpdated;
     v.versionLastEditor = p.lastEditor || '';
@@ -289,6 +312,7 @@ function attachVersionForOpen(p) {
       v._stub = true;
     } else {
       v.provisional = true;                      // a guess: never pushed unless someone puts work in it
+      v.label = firstVersionLabel(v.versionCreatedBy);
       v.versionDrive.lastPushed = v.versionUpdated;
     }
   }
@@ -309,7 +333,9 @@ async function resolveVersionsFolder(p) {
 }
 function versionFilename(label, creator) {
   const clean = s => String(s || '').trim().replace(/@.*$/, '').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '');
-  return (clean(label) || 'Version') + '_' + (clean(creator) || 'user') + '.json';
+  const l = clean(label) || 'Version', c = clean(creator) || 'user';
+  if (l.toLowerCase().endsWith('_' + c.toLowerCase())) return l + '.json';   // "v2 (egordon)" -> v2_egordon.json
+  return l + '_' + c + '.json';
 }
 function uniqueVersionFilename(files, label, creator) {
   const base = versionFilename(label, creator);
@@ -676,8 +702,9 @@ async function migrateLegacyVersion(p, v) {
     }
     const oldId = v.versionId;
     v.versionId = newVersionId();
-    let label = FIRST_VERSION_LABEL + ' (unsynced copy)', n = 2;
-    while (versionLabelTaken(p.id, label, v.versionId)) label = FIRST_VERSION_LABEL + ' (unsynced copy ' + (n++) + ')';
+    const who = versionUserTag(v.versionCreatedBy || meEmail());
+    let label = FIRST_VERSION_LABEL + ' (' + (who ? who + ', ' : '') + 'unsynced copy)', n = 2;
+    while (versionLabelTaken(p.id, label, v.versionId)) label = FIRST_VERSION_LABEL + ' (' + (who ? who + ', ' : '') + 'unsynced copy ' + (n++) + ')';
     v.label = label;
     delete versionStore()[oldId];
     delete v._legacySplit;
@@ -864,7 +891,7 @@ async function copyVersion(versionId) {
     if (!(await pullVersionFromDrive(src, { silent: true }))) { toast('Could not load that version'); return; }
   }
   const from = src.label || 'this version';
-  const label = promptUniqueVersionName(p.id, 'Name for the copy of "' + from + '":', from + ' copy');
+  const label = promptUniqueVersionName(p.id, 'Name for the copy of "' + from + '" (the next number is suggested):', nextVersionLabel(p.id));
   if (label === null) return;
   createVersion(label, { from: src });
   renderCurrentPhase();
@@ -951,7 +978,7 @@ function dropLocalVersionsFor(propertyId) {
 function promptNewVersion() {
   const p = STATE;
   if (!p) return;
-  const name = promptUniqueVersionName(p.id, 'Name this version (e.g. "Conservative", "Elan v2"):');
+  const name = promptUniqueVersionName(p.id, 'Name this version (the next number is suggested; a bare "v3" gets your username):', nextVersionLabel(p.id));
   if (name === null) return;
   const cur = (CURRENT_VERSION && CURRENT_VERSION.label) || 'the current version';
   const choice = prompt('Start "' + name + '" from:\n\n1. ' + cur + '’s comps and market rents (recommended)\n2. Blank (no comps, no market-rent overrides)\n\nEnter 1-2:', '1');
@@ -967,7 +994,7 @@ function versionMenu(versionId) {
     + (e.archived ? 'Unarchive' : 'Archive') + '\n4. Delete (for everyone; the file goes to Drive trash)\n\nEnter 1-4:');
   if (choice === '1') {
     if (!e.local) { toast('Open that version first, then rename it'); return; }
-    const n = promptUniqueVersionName(STATE.id, 'New name for this version:', e.label, versionId);
+    const n = promptUniqueVersionName(STATE.id, 'New name for this version:', e.label, versionId, (e.local && e.local.versionCreatedBy) || (e.row && e.row.createdBy) || '');
     if (n !== null) renameVersion(versionId, n);
   } else if (choice === '2') {
     copyVersion(versionId);
