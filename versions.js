@@ -443,24 +443,125 @@ async function reconcileVersionFromDrive() {
  * and its versionId is not already listed), and drops rows whose file Drive
  * confirms is gone. Never drops a row on a network error.
  */
+/* ------------------------------------------- same-id twin version files
+   (2026-11-25, part 10) Two devices migrating the same pre-versions subject
+   within seconds can each create the deterministic "Original" before seeing
+   the other's file: two files in Versions/ whose CONTENT has one versionId.
+   The folder walk below used to skip the second (id already indexed) and leave
+   it there. Now, on an interactive open only (versionsOnOpen; never the silent
+   tick): keep the file the index row points at (else the one this device uses,
+   else the oldest); a twin with the SAME content goes to Drive trash
+   (restorable); a twin with DIFFERENT content is never guessed at — it becomes
+   its own version (new versionId, label "<label> (twin <date>)"), so both show. */
+function twinContentSame(a, b) {
+  if (!a || !b) return false;
+  return versionSig(a) === versionSig(b) && String(a.label || '') === String(b.label || '')
+    && !!a.archived === !!b.archived;
+}
+function uniqueTwinLabel(propId, rows, base) {
+  const taken = l => versionLabelTaken(propId, l)
+    || rows.some(r => r.propertyId === propId && String(r.label || '').trim().toLowerCase() === l.trim().toLowerCase());
+  if (!taken(base)) return base;
+  for (let i = 2; i < 50; i++) { const c = base + ' ' + i; if (!taken(c)) return c; }
+  return base + ' ' + Date.now().toString(36);
+}
+/** Returns { trashed: [labels], split: [labels], rowsChanged, gone: Set(fileId) }. Mutates rows / cache. */
+async function cleanupTwinVersionFiles(propId, folder, files, rows, cache) {
+  const out = { trashed: [], split: [], rowsChanged: false, gone: new Set() };
+  const groups = new Map();
+  for (const f of files) {
+    const d = cache.get(f.id);
+    if (!d || d.propertyId !== propId || !d.versionId) continue;
+    if (!groups.has(d.versionId)) groups.set(d.versionId, []);
+    groups.get(d.versionId).push(f);
+  }
+  for (const [vid, twins] of groups) {
+    if (twins.length < 2) continue;
+    const row = rows.find(r => r.id === vid);
+    const lv = versionStore()[vid];
+    let keep = (row && twins.find(f => f.id === row.fileId))
+      || (lv && twins.find(f => f.id === lv.versionDrive.fileId))
+      || twins.slice().sort((a, b) => String(a.createdTime || '').localeCompare(String(b.createdTime || '')))[0];
+    const kd = cache.get(keep.id);
+    for (const f of twins) {
+      if (f === keep) continue;
+      const d = cache.get(f.id);
+      if (twinContentSame(kd, d)) {
+        try {
+          await driveRaw('/drive/v3/files/' + f.id + '?supportsAllDrives=true', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }) });
+        } catch (e) { console.warn('twin trash failed: Versions/' + f.name, e); continue; }
+        out.gone.add(f.id);
+        out.trashed.push(f.name);
+        // A local copy that used the trashed file now uses the kept one (same content).
+        versionsOf(propId).forEach(v => {
+          if (v.versionDrive.fileId !== f.id) return;
+          v.versionDrive.fileId = keep.id;
+          v.versionDrive.fileName = keep.name;
+          v.versionDrive.remoteModifiedTime = keep.modifiedTime || null;
+        });
+        console.info('Versions: trashed same-content twin ' + f.name + ' of ' + keep.name + ' (' + vid + ')');
+      } else {
+        const newId = newVersionId();
+        const label = uniqueTwinLabel(propId, rows, String(d.label || 'Untitled') + ' (twin ' + nowISO().slice(0, 10) + ')');
+        const nd = Object.assign({}, d, { versionId: newId, label, propertyId: propId });
+        let r;
+        try { r = await driveUploadJson(folder, f.name, nd, f.id); }
+        catch (e) { console.warn('twin split failed: Versions/' + f.name, e); continue; }
+        cache.set(f.id, nd);
+        rows.push({ id: newId, propertyId: propId, label, archived: !!nd.archived,
+          fileId: f.id, fileName: f.name, createdAt: nd.versionCreatedAt || f.createdTime || '', createdBy: nd.versionCreatedBy || '',
+          lastModified: nd.versionUpdated || (r && r.modifiedTime) || '', lastEditor: nd.versionLastEditor || '',
+          compCount: (nd.comps || []).length, currentEditor: '', currentEditorHeartbeatAt: null });
+        out.rowsChanged = true;
+        out.split.push(label);
+        // A local copy that used this file follows it into the new version (its content is this file's).
+        versionsOf(propId).forEach(v => {
+          if (v.versionDrive.fileId !== f.id) return;
+          const oldId = v.versionId;
+          delete versionStore()[oldId];
+          v.versionId = newId;
+          v.label = label;
+          v.versionDrive.remoteModifiedTime = (r && r.modifiedTime) || nowISO();
+          versionStore()[newId] = v;
+          Object.keys(STORE.currentVersionByProperty).forEach(k => {
+            if (STORE.currentVersionByProperty[k] === oldId) STORE.currentVersionByProperty[k] = newId;
+          });
+        });
+        console.info('Versions: different-content twin ' + f.name + ' of ' + keep.name + ' -> new version "' + label + '"');
+      }
+    }
+  }
+  return out;
+}
+
 async function reconcileVersionsFolder() {
   const p = STATE;
   if (!p || !p.drive.folderId || !driveConnected()) return;
   const propId = p.id;
   let folder;
   try { folder = await resolveVersionsFolder(p); } catch (e) { return; }
-  const files = (await listVersionFiles(folder)).filter(f => /\.json$/i.test(f.name));
+  let files = (await listVersionFiles(folder)).filter(f => /\.json$/i.test(f.name));
   const m = await fetchManifest(true);
   if (!m || !STATE || STATE.id !== propId) return;
   if (!Array.isArray(m.data.versions)) m.data.versions = [];
   const rows = m.data.versions;
+  // Read every version file once (the twin check needs the content of all of them).
+  const cache = new Map();
+  for (const f of files) {
+    let d = null;
+    try { d = JSON.parse(await driveDownloadText(f.id)); } catch (e) { d = null; }
+    cache.set(f.id, d);
+  }
+  if (!STATE || STATE.id !== propId) return;
+  const twins = await cleanupTwinVersionFiles(propId, folder, files, rows, cache);
+  files = files.filter(f => !twins.gone.has(f.id));
   const byFile = new Set(rows.map(r => r.fileId).filter(Boolean));
   const byId = new Set(rows.map(r => r.id));
   const added = [], dropped = [];
   for (const f of files) {
     if (byFile.has(f.id)) continue;
-    let d = null;
-    try { d = JSON.parse(await driveDownloadText(f.id)); } catch (e) { continue; }
+    const d = cache.get(f.id);
     if (!d || d.propertyId !== propId || !d.versionId || byId.has(d.versionId)) continue;
     rows.push({ id: d.versionId, propertyId: propId, label: d.label || 'Untitled', archived: !!d.archived,
       fileId: f.id, fileName: f.name, createdAt: d.versionCreatedAt || f.createdTime || '', createdBy: d.versionCreatedBy || '',
@@ -481,7 +582,12 @@ async function reconcileVersionsFolder() {
       if (lv && lv !== CURRENT_VERSION) delete versionStore()[r.id];
     } else keep.push(r);
   }
-  if (!added.length && !dropped.length) return;
+  if (twins.trashed.length) toast('Moved ' + twins.trashed.length + ' duplicate version file' + (twins.trashed.length > 1 ? 's' : '')
+    + ' (same content) to Drive trash: ' + twins.trashed.join(', '), 6000);
+  if (twins.split.length) toast('Found ' + twins.split.length + ' version file' + (twins.split.length > 1 ? 's' : '')
+    + ' sharing an id but with different content — kept as its own version: ' + twins.split.join(', '), 8000);
+  if (twins.trashed.length || twins.split.length) saveStore();
+  if (!added.length && !dropped.length && !twins.rowsChanged) { if (twins.trashed.length) renderVersionStrip(); return; }
   if (!STATE || STATE.id !== propId) return;
   m.data.versions = keep;
   m.data.updatedAt = nowISO();

@@ -1049,7 +1049,7 @@ async function promptFindFolder() {
     const msg = `Link this deal folder?\n\n${c.name}\n(${c.pipelineName}, match ${c.score})`
       + (more ? `\n\nOK = link · Cancel = see next best (${more} more)` : `\n\nOK = link · Cancel = stop`);
     if (confirm(msg)) {
-      await linkDealFolder(STATE, c.id, c.name, c.pipelineName);
+      if (!(await linkDealFolder(STATE, c.id, c.name, c.pipelineName))) { updateFolderStatus(); return; }
       updateFolderStatus();
       renderCurrentPhase();
       toast('Linked ' + c.name);
@@ -1066,7 +1066,7 @@ async function promptLinkFolderByUrl() {
   const id = extractFolderId(inp);
   if (!id) { toast('Could not find a folder ID in that'); return; }
   try {
-    await linkDealFolder(STATE, id, '', '');
+    if (!(await linkDealFolder(STATE, id, '', ''))) { updateFolderStatus(); return; }
     updateFolderStatus();
     renderCurrentPhase();
     toast('Linked ' + (STATE.drive.folderName || id));
@@ -1086,7 +1086,8 @@ async function maybeAutoLinkFolder() {
   try {
     const cands = await findDealFolderCandidates(name, STATE.subject.city, STATE.subject.state);
     if (cands.length && cands[0].score >= 100) {
-      await linkDealFolder(STATE, cands[0].id, cands[0].name, cands[0].pipelineName);
+      if (!STATE || STATE.drive.folderId) return;   // linked by hand meanwhile
+      if (!(await linkDealFolder(STATE, cands[0].id, cands[0].name, cands[0].pipelineName, { silent: true }))) return;
       updateFolderStatus();
       toast('Auto-linked ' + cands[0].name);
       if (CURRENT_PHASE === 1) renderPhase1();

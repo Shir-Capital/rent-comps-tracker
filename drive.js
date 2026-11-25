@@ -465,7 +465,152 @@ async function ensureTrackerFolder(p) {
   return p.drive.trackerFolderId;
 }
 
-async function linkDealFolder(p, folderId, folderName, pipelineName) {
+/* ------------------------------------------- one subject per deal folder
+   (2026-11-25, part 10) Lila at Oakgate ended up as TWO subjects for ONE deal
+   folder: a second subject could be linked to a folder another subject already
+   used, and the two then overwrote each other's rent_comps.json. Every link
+   path (folder search, link by URL, the silent auto-link, New Subject's
+   search) goes through linkDealFolder, so the check lives there: if another
+   subject already owns the folder, nothing is linked and the user is offered
+   that subject instead. Nothing is ever merged automatically. */
+
+/** Another subject that already uses this deal folder, or null. Looks at the
+    org index (dealFolderId), this device's own subjects, and the folder's
+    3. Comps / Rent Comps Tracker / rent_comps.json (its `id`). Find-only. */
+async function findSubjectForFolder(p, folderId) {
+  if (!folderId) return null;
+  const selfId = p && p.id;
+  const m = driveConnected() ? await fetchManifest(true) : null;
+  const rows = (m && m.data && Array.isArray(m.data.properties)) ? m.data.properties : [];
+  const row = rows.find(r => r && r.id && r.id !== selfId && r.dealFolderId === folderId);
+  if (row) return { id: row.id, name: row.name || row.id, lastEditor: row.lastEditor || '',
+    lastModified: row.lastModified || '', archived: !!row.archived, entry: row,
+    local: STORE.properties[row.id] || null, how: 'index' };
+  const loc = Object.values(STORE.properties || {}).find(x => x && x.id !== selfId
+    && x.drive && x.drive.folderId === folderId);
+  if (loc) return { id: loc.id, name: loc.name || loc.id, lastEditor: loc.lastEditor || '',
+    lastModified: loc.updated || '', archived: !!loc.archived, entry: null, local: loc, how: 'device' };
+  if (!driveConnected()) return null;
+  try {
+    const comps = await driveFindSubfolder(folderId, COMPS_FOLDER);
+    if (!comps) return null;
+    const tracker = await driveFindSubfolder(comps, TRACKER_FOLDER);
+    if (!tracker) return null;
+    const hits = await driveList(
+      `'${tracker}' in parents and name='${STATE_FILENAME}' and trashed=false`, 'id,name,modifiedTime');
+    if (!hits.length) return null;
+    const d = JSON.parse(await driveDownloadText(hits[0].id));
+    if (!d || !d.id || d.id === selfId) return null;
+    return { id: d.id, name: d.name || d.id, lastEditor: d.lastEditor || '', lastModified: d.updated || '',
+      archived: !!d.archived, local: STORE.properties[d.id] || null, how: 'file',
+      entry: { id: d.id, name: d.name, dealFolderId: folderId, trackerFileId: hits[0].id } };
+  } catch (e) {
+    console.warn('findSubjectForFolder', e);
+    return null;
+  }
+}
+
+/** A subject with nothing in it worth keeping: never on Drive, no comps in any
+    version, no unit mix, no leases. Only such a subject is dropped when the
+    user opens the existing one instead. */
+function subjectIsBlank(p) {
+  if (!p) return true;
+  if (p.drive && (p.drive.fileId || p.drive.lastPushed)) return false;
+  if ((p.subjectUnitMix || []).length || (p.subjectLeases || []).length || (p.comps || []).length) return false;
+  if (typeof versionsOf === 'function' && versionsOf(p.id).some(v => (v.comps || []).length)) return false;
+  return true;
+}
+
+function describeDupSubject(dup) {
+  return '"' + dup.name + '"'
+    + (dup.archived ? ' (archived)' : '')
+    + (dup.lastEditor ? ', last edited by ' + dup.lastEditor : '')
+    + (dup.lastModified ? ' ' + relTime(dup.lastModified) : '');
+}
+
+/** Open the subject that already owns the folder; drop `p` if it is blank. */
+async function openExistingSubject(p, dup) {
+  const dropIt = p && STORE.properties[p.id] && subjectIsBlank(p);
+  if (dropIt) {
+    // Same order as the drawer's "Delete from this device": stop anything that
+    // could re-upsert the index row BEFORE removing it.
+    cancelAutoPush();
+    stopAutoSync();
+    if (typeof releaseVersionHeartbeat === 'function' && typeof CURRENT_VERSION !== 'undefined'
+        && CURRENT_VERSION && CURRENT_VERSION.propertyId === p.id) releaseVersionHeartbeat(CURRENT_VERSION);
+    delete STORE.properties[p.id];
+    if (typeof dropLocalVersionsFor === 'function') dropLocalVersionsFor(p.id);
+    if (STATE && STATE.id === p.id) STATE = null;
+    saveStore();
+    await removeManifestEntry(p.id);
+  }
+  hideSyncBar('dupsubject-conflict');
+  const local = STORE.properties[dup.id];
+  if (local) openProperty(local.id);
+  else if (dup.entry) await openRemoteProperty(dup.entry);
+  else toast('Could not find that subject');
+  if (!STATE) { showHome(); setHash('#/'); return; }   // the open failed (it toasted why)
+  if (STATE.id !== dup.id) return;
+  toast(dropIt ? 'Opened the existing subject — the empty new one was removed from this device'
+    : 'Opened the existing subject');
+}
+
+let DUP_SUBJECT_OFFER = null;   // { p, dup } behind the sync bar's "Open the existing subject"
+
+/** Show the duplicate as a sync bar whose action opens the existing subject. */
+function showDupSubjectBar(p, dup, why) {
+  DUP_SUBJECT_OFFER = { p, dup };
+  /* Shown over a conflict bar on purpose: two subjects on one folder is the
+     cause of that conflict, and its "keep this device's version" would
+     overwrite the other subject's file. The reason ends in "conflict" so the
+     co-editor bar (syncTick) never covers it. */
+  showSyncBar('⚠️ <b>' + esc(why) + '</b> ' + esc(describeDupSubject(dup))
+    + ' already uses this deal folder. Two subjects on one folder overwrite each other\'s rent_comps.json.', {
+    reason: 'dupsubject-conflict',
+    actions: [
+      { key: 'opendup', cls: 'primary', label: '↗ Open the existing subject',
+        title: 'Opens the subject that already owns this folder' + (subjectIsBlank(p) ? '; this empty one is removed from this device' : '') },
+    ],
+  });
+}
+
+/**
+ * Called by linkDealFolder before it links. Returns true when the link may go
+ * ahead. When another subject owns the folder: interactive -> ask, and on OK
+ * open that subject; silent (auto-link) -> a sync bar with the same offer.
+ */
+async function guardDealFolderLink(p, folderId, opts) {
+  let dup = null;
+  try { dup = await findSubjectForFolder(p, folderId); } catch (e) { dup = null; }
+  if (!dup) return true;
+  if (opts && opts.silent) { showDupSubjectBar(p, dup, 'Not linked:'); return false; }
+  const blank = subjectIsBlank(p);
+  const ok = confirm('This deal folder already belongs to another subject:\n\n'
+    + describeDupSubject(dup) + '\n\n'
+    + 'Two subjects on one folder overwrite each other\'s rent_comps.json, so this one was NOT linked.\n\n'
+    + 'OK = open the existing subject'
+    + (blank ? ' (this empty new subject is removed from this device)' : ' (this subject has data, so it stays on this device, unlinked)')
+    + '\nCancel = stay here, unlinked');
+  if (ok) await openExistingSubject(p, dup);
+  return false;
+}
+
+/** On open: a linked subject whose folder another subject also claims. Uses
+    the index (cheap, already fetched); pullFromDrive also checks the file's id. */
+async function checkDuplicateSubjectOnOpen() {
+  const p = STATE;
+  if (!p || !p.drive.folderId || !driveConnected()) return;
+  const m = await fetchManifest();
+  if (!m || STATE !== p) return;
+  const row = (m.data.properties || []).find(r => r && r.id && r.id !== p.id && r.dealFolderId === p.drive.folderId);
+  if (!row) return;
+  showDupSubjectBar(p, { id: row.id, name: row.name || row.id, lastEditor: row.lastEditor || '',
+    lastModified: row.lastModified || '', archived: !!row.archived, entry: row,
+    local: STORE.properties[row.id] || null, how: 'index' }, 'Duplicate subject:');
+}
+
+async function linkDealFolder(p, folderId, folderName, pipelineName, opts) {
+  if (!(opts && opts.allowDuplicate) && !(await guardDealFolderLink(p, folderId, opts))) return null;
   p.drive.folderId = folderId;
   p.drive.folderName = folderName || '';
   p.drive.pipelineName = pipelineName || '';
@@ -704,6 +849,15 @@ async function pullFromDrive(opts) {
     const txt = await driveDownloadText(fileId);
     const remote = JSON.parse(txt);
     const meta = await driveGetMeta(fileId, 'id,modifiedTime');
+    /* Part 10: the folder's shared file belongs to a DIFFERENT subject id —
+       how a duplicate subject shows up on a device that is already linked.
+       Flag it; the pull itself still goes ahead as before (no auto-merge). */
+    if (remote && remote.id && remote.id !== STATE.id) {
+      const other = { id: remote.id, name: remote.name || remote.id, lastEditor: remote.lastEditor || '',
+        lastModified: remote.updated || '', archived: !!remote.archived, local: STORE.properties[remote.id] || null,
+        how: 'file', entry: { id: remote.id, name: remote.name, dealFolderId: STATE.drive.folderId, trackerFileId: fileId } };
+      setTimeout(() => { if (STATE) showDupSubjectBar(STATE, other, 'Duplicate subject:'); }, 0);
+    }
 
     // Keep our local id + Drive pointers; adopt everything else.
     const localId = STATE.id;
@@ -883,6 +1037,18 @@ async function runSyncAction(key) {
     }
     const okPull = await pullFromDrive({ confirmed: true });
     if (okPull) { hideSyncBar(); toast('Now on the Drive version'); }
+    return;
+  }
+
+  if (key === 'opendup') {
+    const o = DUP_SUBJECT_OFFER;
+    if (!o) { hideSyncBar(); return; }
+    const blank = subjectIsBlank(o.p);
+    if (!confirm('Open ' + describeDupSubject(o.dup) + '?\n\n'
+      + (blank ? 'This empty subject is removed from this device.'
+        : 'This subject has data, so it stays on this device. Nothing is merged — copy across what you need, then remove the one you do not want.'))) return;
+    DUP_SUBJECT_OFFER = null;
+    await openExistingSubject(o.p, o.dup);
     return;
   }
 

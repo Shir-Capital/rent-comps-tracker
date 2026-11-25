@@ -1082,7 +1082,9 @@ function openProperty(id, opts) {
   updateFolderStatus();
   updateSyncStatus();
   startAutoSync();
-  Promise.resolve(reconcileFromDrive()).then(() => { if (typeof versionsOnOpen === 'function') return versionsOnOpen(); });
+  Promise.resolve(reconcileFromDrive()).then(() => { if (typeof versionsOnOpen === 'function') return versionsOnOpen(); })
+    .then(() => { if (typeof checkDuplicateSubjectOnOpen === 'function') return checkDuplicateSubjectOnOpen(); })
+    .catch(e => console.warn('open checks', e));
   maybeAutoLinkFolder();
 }
 
