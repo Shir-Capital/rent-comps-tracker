@@ -609,6 +609,47 @@ async function checkDuplicateSubjectOnOpen() {
     local: STORE.properties[row.id] || null, how: 'index' }, 'Duplicate subject:');
 }
 
+/* ------------------------------------- duplicate push block (part 10c)
+   Owner, 2026-11-25: a subject flagged as a duplicate must not save over the
+   other subject's file. Two subjects on one deal folder share exactly one
+   file, 3. Comps / Rent Comps Tracker / rent_comps.json (version files carry
+   their own propertyId and never collide). That file names its owner in its
+   `id`. So before pushToDrive writes it: if the index has ANOTHER subject on
+   this folder, or this subject was already seen as a duplicate (pullFromDrive),
+   read the file's id; when it is another subject's, nothing is written and the
+   duplicate bar says so. The subject that owns the file saves as usual; when
+   the file does not exist yet, the first to write it owns it. Comps and market
+   rents still save (their own version files); only the shared subject data
+   (subject, unit mix, leases, family) waits on this device. */
+const DUP_SUSPECT = new Set();            // subject ids seen as a duplicate this session
+let DUP_OWNER_CACHE = null;               // { fileId, modifiedTime, ownerId, name, lastEditor, updated, archived }
+
+/** The other subject that owns this folder's shared file, or null when `p` may write it. */
+async function sharedFileOwnedByOther(p) {
+  if (!p || !p.drive.folderId || !p.drive.fileId) return null;
+  const m = MANIFEST_CACHE || await fetchManifest();
+  const rows = (m && m.data && Array.isArray(m.data.properties)) ? m.data.properties : [];
+  const others = rows.filter(r => r && r.id && r.id !== p.id && r.dealFolderId === p.drive.folderId);
+  if (!others.length && !DUP_SUSPECT.has(p.id)) return null;
+  let meta;
+  try { meta = await driveGetMeta(p.drive.fileId, 'id,modifiedTime,trashed'); }
+  catch (e) { return null; }              // gone: the write creates it again (first writer owns it)
+  if (meta.trashed) return null;
+  let c = DUP_OWNER_CACHE;
+  if (!c || c.fileId !== p.drive.fileId || c.modifiedTime !== meta.modifiedTime) {
+    const d = JSON.parse(await driveDownloadText(p.drive.fileId)) || {};
+    c = DUP_OWNER_CACHE = { fileId: p.drive.fileId, modifiedTime: meta.modifiedTime, ownerId: d.id || '',
+      name: d.name || d.id || '', lastEditor: d.lastEditor || '', updated: d.updated || '', archived: !!d.archived };
+  }
+  if (!c.ownerId || c.ownerId === p.id) return null;
+  DUP_SUSPECT.add(p.id);
+  const row = rows.find(r => r.id === c.ownerId);
+  return { id: c.ownerId, name: (row && row.name) || c.name, lastEditor: (row && row.lastEditor) || c.lastEditor,
+    lastModified: (row && row.lastModified) || c.updated, archived: row ? !!row.archived : c.archived,
+    local: STORE.properties[c.ownerId] || null, how: 'file',
+    entry: row || { id: c.ownerId, name: c.name, dealFolderId: p.drive.folderId, trackerFileId: p.drive.fileId } };
+}
+
 async function linkDealFolder(p, folderId, folderName, pipelineName, opts) {
   if (!(opts && opts.allowDuplicate) && !(await guardDealFolderLink(p, folderId, opts))) return null;
   p.drive.folderId = folderId;
@@ -704,6 +745,17 @@ async function pushToDrive(opts) {
           return false;
         }
       } catch (e) { /* fall through and write */ }
+    }
+
+    /* Part 10c: never write another subject's shared file (see sharedFileOwnedByOther). */
+    const owner = await sharedFileOwnedByOther(STATE);
+    if (owner) {
+      showDupSubjectBar(STATE, owner, 'Not saved to Drive:');
+      if (versionWrote) await upsertManifestEntry(STATE);
+      if (!silent) toast('Not saved: this deal folder\'s file belongs to "' + owner.name + '"'
+        + (versionOk && V ? ' (the comps of version "' + V.label + '" did save)' : ''), 6000);
+      updateSyncStatus();
+      return false;
     }
 
     const r = await driveUploadJson(folder, STATE_FILENAME,
@@ -853,6 +905,7 @@ async function pullFromDrive(opts) {
        how a duplicate subject shows up on a device that is already linked.
        Flag it; the pull itself still goes ahead as before (no auto-merge). */
     if (remote && remote.id && remote.id !== STATE.id) {
+      DUP_SUSPECT.add(STATE.id);
       const other = { id: remote.id, name: remote.name || remote.id, lastEditor: remote.lastEditor || '',
         lastModified: remote.updated || '', archived: !!remote.archived, local: STORE.properties[remote.id] || null,
         how: 'file', entry: { id: remote.id, name: remote.name, dealFolderId: STATE.drive.folderId, trackerFileId: fileId } };
@@ -933,7 +986,7 @@ function updateSyncStatus() {
   if (!s || !STATE) return;
   if (!STATE.drive.folderId) { s.textContent = 'No Drive folder linked.'; return; }
   s.textContent = 'Last saved to Drive ' + relTime(STATE.drive.lastPushed)
-    + (deviceIsDirty() ? ' · unsynced edits pending' : '')
+    + (deviceIsDirty() ? (DUP_SUSPECT.has(STATE.id) ? ' · subject edits NOT saved (duplicate subject)' : ' · unsynced edits pending') : '')
     + ' · last backup ' + relTime(STATE.drive.lastBackupAt);
 }
 
