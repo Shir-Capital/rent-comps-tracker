@@ -52,6 +52,12 @@
 .pf-stamp + .pf-stamp { margin-top: 2px; }
 .pf-stamp-file { font-weight: 600; }
 
+/* Phones (2026-11-25, owner): the card's buttons (Read COMPS tab, Apply checked, Back, Cancel, Yes, replace / Keep what
+   I have) were 30 px tall — below the 44 px touch size. Desktop keeps the compact 27 px rows (styles.css). */
+@media (max-width: 899px) {
+  #pf-card .btn-row .btn { min-height: 44px; }
+}
+
 @media (min-width: 900px) {
   /* 3 columns x 5 rows (owner, 2026-11-24), filled row by row in rank order, so with 3 versions per file type each
      row is one type. Phones keep the one-column list (same order). */

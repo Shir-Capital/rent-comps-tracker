@@ -133,6 +133,11 @@ html, body {
   border-bottom-color: #fff;
   background: rgba(255, 255, 255, .07);
 }
+/* Phones (2026-11-25, owner): four 92 px-minimum tabs came to 380 px, 5 px wider than a 375 px phone, so "4. Export"
+   sat half off-screen. Below 480 px the tabs share the width by their label length and pad less. */
+@media (max-width: 479px) {
+  .phase-tabs .tab { flex: 1 1 auto; min-width: 0; padding: 0 7px; font-size: 14.5px; }
+}
 
 /* ---------------------------------------------------------------- main */
 main { padding: 10px 10px 96px; max-width: 900px; margin: 0 auto; }
