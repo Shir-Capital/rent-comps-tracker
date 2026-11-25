@@ -761,7 +761,7 @@ async function pxBuildWorkbook(mirror) {
   {
     const ws = wb.addWorksheet('READ ME');
     const W = 4;
-    titleRow(ws, 'PASTE INTO THE PROFORMA — ' + (s.name || STATE.name) + ' — ' + todayISO(), W);
+    titleRow(ws, 'PASTE INTO THE PROFORMA — ' + (s.name || STATE.name) + exportVersionTitle() + ' — ' + todayISO(), W);
     const line = (a, b, bold) => {
       const r = ws.addRow([a, b]);
       r.getCell(1).font = Object.assign({}, font, { bold: !!bold });
@@ -779,6 +779,10 @@ async function pxBuildWorkbook(mirror) {
     line('IT CANNOT CLEAR', 'A paste can set and overwrite but never empty a cell. If a comp slot already holds data, do the CLEAR FIRST sheet first.', true);
     ws.addRow([]);
     line('Built against', TAB.templateVersion || 'SHIR_MF_Template_v75');
+    { const x = typeof exportVersionInfo === 'function' ? exportVersionInfo() : null;
+      if (x) line('Version', x.label + ' — the comps and market rents of this version of the subject'
+        + (x.versions_of_subject > 1 ? ' (it has ' + x.versions_of_subject + ' versions)' : '')
+        + (x.last_editor ? '; last edited by ' + x.last_editor : '') + (x.last_edited ? ' ' + String(x.last_edited).slice(0, 16).replace('T', ' ') + ' UTC' : '')); }
     line('Mode', mirror.aligned
       ? 'ALIGNED to ' + mirror.tgt.fileName + ' — fee rows, subject plan rows and every attribute row resolved against that workbook' +
         (mirror.tgt.band ? ' (attribute band: ' + mirror.tgt.band.layout + ' layout)' : '')

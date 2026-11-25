@@ -906,6 +906,23 @@ function wireVersionStrip() {
   });
 }
 
+/** The open version, as the exports name it (2026-11-25). null when versions are not in play. */
+function exportVersionInfo() {
+  const v = CURRENT_VERSION;
+  if (!v || !STATE || v.propertyId !== STATE.id) return null;
+  return {
+    id: v.versionId, label: v.label || 'Original',
+    last_edited: v.versionUpdated || '', last_editor: v.versionLastEditor || '',
+    created_by: v.versionCreatedBy || '', file_name: v.versionDrive.fileName || '',
+    versions_of_subject: Math.max(1, versionCountFor(STATE.id)),
+  };
+}
+/** "Elan v2" -> "_Elan_v2" for file names; '' when versions are not in play. */
+function exportVersionSlug() {
+  const x = exportVersionInfo();
+  return x ? '_' + String(x.label).replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') : '';
+}
+
 /** Home card: the counts of the version this device would open. */
 function homeVersionView(p) {
   const vs = versionsOf(p.id);

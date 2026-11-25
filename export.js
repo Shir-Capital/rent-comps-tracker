@@ -281,6 +281,10 @@ function buildPopulatorPayload() {
     populator_script: TAB.populatorScript || 'rent-comp-data-populator-populate_comps-v55.py',
     generated_at: nowISO(),
     generated_by: (CURRENT_USER && CURRENT_USER.email) || '',
+    /* Which version of the comps + market rents this payload carries (versions.js,
+       2026-11-25): {id, label, last_edited, last_editor, created_by, file_name,
+       versions_of_subject}. null on a record without versions. */
+    rent_comps_version: typeof exportVersionInfo === 'function' ? exportVersionInfo() : null,
     property_url: APP_BASE_URL + propertyHash(STATE).replace(/^#/, '#'),
 
     subject_property: {
@@ -441,7 +445,15 @@ function mandatoryFeesJson(fees) {
 
 function exportFileBase() {
   const nm = slugify(STATE.subject.name || STATE.name);
-  return 'RentComps_' + nm + '_' + todayISO();
+  /* The version's name rides in every export file name (2026-11-25):
+     RentComps_<subject>_<version>_<date>. */
+  const vs = typeof exportVersionSlug === 'function' ? exportVersionSlug() : '';
+  return 'RentComps_' + nm + vs + '_' + todayISO();
+}
+/** " — Version: Elan v2" for workbook titles; '' when versions are not in play. */
+function exportVersionTitle() {
+  const x = typeof exportVersionInfo === 'function' ? exportVersionInfo() : null;
+  return x ? ' — Version: ' + x.label : '';
 }
 
 function downloadBlob(blob, filename) {
@@ -525,7 +537,7 @@ async function buildCompsWorkbook() {
       'Stories', 'Dist (mi)', 'Vac %', 'Conc $', 'Conc mo', 'W/D', 'Utilities', 'Reno',
       'Source', 'Plans', 'Avg SF', 'Avg Ask $', '$/SF', 'Min $', 'Max $', 'Sections',
       'Visited', 'By', 'Phone', 'Notes'];
-    titleRow(ws, `RENT COMPS — ${s.name || STATE.name} — ${todayISO()}`, heads.length);
+    titleRow(ws, `RENT COMPS — ${s.name || STATE.name}${exportVersionTitle()} — ${todayISO()}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
@@ -562,7 +574,7 @@ async function buildCompsWorkbook() {
     const ws = wb.addWorksheet('Unit Mix');
     const heads = ['Comp #', 'Comp Name', 'Type', 'COMPS Section', 'COMPS Row', 'Floor Plan',
       'Beds', 'Baths', 'SF', '# Units', 'Occ %', 'Ask $/Mo', '$/SF', 'Status', 'Concession', 'Notes'];
-    titleRow(ws, `COMP UNIT MIX — ${s.name || STATE.name}`, heads.length);
+    titleRow(ws, `COMP UNIT MIX — ${s.name || STATE.name}${exportVersionTitle()}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
@@ -642,7 +654,7 @@ async function buildCompsWorkbook() {
     const heads = ['COMPS Section', 'Label', 'Rows', 'Subj Units', 'Subj Avg SF', 'Subj Avg Rent',
       'Wtd Ask (direct)', '$/SF (direct)', '$/SF x Subj SF', 'Suggested', 'Override',
       'FINAL -> col G', 'Method', 'Sample rows', 'Sample comps', 'Delta vs in-place'];
-    titleRow(ws, `MARKET RENTS — from Direct comps only — ${s.name || STATE.name}`, heads.length);
+    titleRow(ws, `MARKET RENTS — from Direct comps only — ${s.name || STATE.name}${exportVersionTitle()}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
@@ -675,7 +687,7 @@ async function buildCompsWorkbook() {
   {
     const ws = wb.addWorksheet('COMPS Cell Map');
     const heads = ['Cell', 'Row', 'Col', 'Belongs To', 'Field', 'Value'];
-    titleRow(ws, `COMPS TAB CELL MAP — what ${TAB.populatorScript || 'populate_comps'} writes — ${TAB.templateVersion || 'SHIR_MF_Template_v75'}`, heads.length);
+    titleRow(ws, `COMPS TAB CELL MAP — what ${TAB.populatorScript || 'populate_comps'} writes — ${TAB.templateVersion || 'SHIR_MF_Template_v75'}${exportVersionTitle()}`, heads.length);
     ws.addRow([]);
     ws.addRow(heads);
     styleHeaderRow(ws, 3, heads.length);
@@ -930,6 +942,9 @@ function renderPhase4() {
         <hr class="hr-soft"/>
         <div class="kv"><span class="k">Sections priced (col G)</span><span class="v">${rents.filter(r => r.effective > 0).length}/${BUCKETS.length}</span></div>
         <div class="kv"><span class="k">Target</span><span class="v">${esc(TAB.templateVersion)} · rows ${esc(TAB.rowHeader)}–${esc(TAB.amenRowLast)}</span></div>
+        ${(function () { const x = typeof exportVersionInfo === 'function' ? exportVersionInfo() : null;
+          return x ? '<div class="kv"><span class="k">Version exported</span><span class="v">' + esc(x.label)
+            + (x.versions_of_subject > 1 ? ' <span class="muted">(1 of ' + x.versions_of_subject + ')</span>' : '') + '</span></div>' : ''; })()}
         ${TAB.templateSlots > MAX_COMPS ? `<div class="tiny muted" style="margin-top:6px">
           The COMPS tab has ${esc(TAB.templateSlots)} comp slots, but the last
           ${esc(TAB.templateSlots - MAX_COMPS)} (cols ${esc((TAB.templateSlotBaseCols || []).slice(MAX_COMPS).map(colLetter).join(', '))})
@@ -947,6 +962,8 @@ function renderPhase4() {
           proforma through a browser Excel library risks its array formulas.
           Instead it emits the JSON that <b>populate_comps.py</b> already consumes,
           plus a workbook showing every value and the COMPS cell it targets.
+          ${(function () { const x = typeof exportVersionInfo === 'function' ? exportVersionInfo() : null;
+            return x ? ' Every export carries the open version, <b>' + esc(x.label) + '</b>, and is named for it.' : ''; })()}
         </div>
         <div class="stack">
           <button class="btn primary" id="btn-x-both">⬆ Workbook + JSON → Drive</button>
